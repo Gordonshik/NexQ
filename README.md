@@ -119,7 +119,7 @@ The full history is in the [CHANGELOG](CHANGELOG.md).
 - Assist, What to Say, Shorten, Follow-Up, Recap and free-form Ask
 - Question Detection, with optional Auto-Answer
 - Scenarios for interviews, lectures, oral exam practice, webinars and team meetings, with editable prompts
-- Ask about your screen with a screenshot (Claude subscription)
+- Ask about your screen with a screenshot (Claude subscription or a local model)
 
 </td>
 </tr>
@@ -234,7 +234,7 @@ On macOS, use <kbd>Cmd</kbd> in place of <kbd>Ctrl</kbd>. The three <kbd>Ctrl</k
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | Start or end a meeting |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | Switch between the overlay and the dashboard |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> | Assist from any app, without switching windows |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Capture the screen into Ask (Claude subscription, Windows) |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Capture the screen into Ask (Claude subscription or a local model, Windows) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> | Hide from screen share |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Open or close Settings |
 

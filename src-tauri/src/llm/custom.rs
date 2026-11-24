@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
-    cancellable, check_cancelled, is_cancelled, emit_end, emit_error, emit_token, TokenSink,
+    cancellable, check_cancelled, is_cancelled, emit_end, emit_error, emit_token,
+    ollama_message_json, openai_message_json, TokenSink,
 };
 use super::stream_parser::{LineBuffer, NDJSONParser, SSEParser};
 use super::thinking::{self, RequestOptions, ThinkingSetting};
@@ -146,6 +147,7 @@ impl CustomClient {
     async fn open_chat_stream(
         &self,
         msgs: &[serde_json::Value],
+        native_msgs: &[serde_json::Value],
         model: &str,
         params: &GenerationParams,
     ) -> Result<reqwest::Response, LLMError> {
@@ -164,7 +166,7 @@ impl CustomClient {
 
         let (second, unreachable) = match self
             .attempt("/api/chat", "custom:/api/chat", model, params, setting, |with_thinking| {
-                native_chat_body(msgs, model, setting, extra.as_ref(), with_thinking)
+                native_chat_body(native_msgs, model, setting, extra.as_ref(), with_thinking)
             })
             .await?
         {
@@ -453,20 +455,15 @@ impl LLMProvider for CustomClient {
 
         thinking::apply_prompt_hint(&mut messages, model, thinking::resolve(&params, self.options.thinking));
 
-        let msgs: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                json!({
-                    "role": m.role,
-                    "content": m.content
-                })
-            })
-            .collect();
+        // The two endpoints want images differently: OpenAI-compatible servers
+        // take them as content parts, Ollama's native API as an `images` array.
+        let msgs: Vec<serde_json::Value> = messages.iter().map(openai_message_json).collect();
+        let native_msgs: Vec<serde_json::Value> = messages.iter().map(ollama_message_json).collect();
 
         // NOTE: llm_stream_start is emitted by IntelligenceEngine::generate_assist()
         // with the correct mode. Do NOT emit it here — it would overwrite the mode.
 
-        let response = match self.open_chat_stream(&msgs, model, &params).await {
+        let response = match self.open_chat_stream(&msgs, &native_msgs, model, &params).await {
             Ok(response) => response,
             Err(LLMError::Cancelled) => return Err(LLMError::Cancelled),
             Err(e) => {
@@ -620,7 +617,7 @@ mod tests {
     }
 
     async fn failure_message(client: &CustomClient, model: &str) -> String {
-        match client.open_chat_stream(&hi(), model, &GenerationParams::default()).await {
+        match client.open_chat_stream(&hi(), &hi(), model, &GenerationParams::default()).await {
             Err(LLMError::ProviderError(message)) => message,
             other => panic!("expected a provider error, got {:?}", other.map(|r| r.status())),
         }
@@ -657,7 +654,7 @@ mod tests {
     async fn an_ollama_native_server_still_answers_on_api_chat() {
         let (base, seen) = server(vec![("/v1/api/chat", 200, "{}")]).await;
         let response = client(&base, CustomAuthType::None, None)
-            .open_chat_stream(&hi(), "llama3.2", &GenerationParams::default())
+            .open_chat_stream(&hi(), &hi(), "llama3.2", &GenerationParams::default())
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
@@ -721,7 +718,7 @@ mod tests {
     async fn a_bearer_token_is_sent_without_spaces_around_it() {
         let (base, seen) = server(vec![("/v1/chat/completions", 200, "{}")]).await;
         client(&base, CustomAuthType::Bearer, Some("  tok "))
-            .open_chat_stream(&hi(), "m", &GenerationParams::default())
+            .open_chat_stream(&hi(), &hi(), "m", &GenerationParams::default())
             .await
             .unwrap();
         assert_eq!(seen.lock().unwrap()[0], ("/v1/chat/completions".to_string(), Some("Bearer tok".to_string())));
@@ -733,7 +730,7 @@ mod tests {
     async fn a_blank_credential_sends_no_auth_header() {
         let (base, seen) = server(vec![("/v1/chat/completions", 200, "{}")]).await;
         client(&base, CustomAuthType::Bearer, Some("   "))
-            .open_chat_stream(&hi(), "m", &GenerationParams::default())
+            .open_chat_stream(&hi(), &hi(), "m", &GenerationParams::default())
             .await
             .unwrap();
         assert_eq!(seen.lock().unwrap()[0], ("/v1/chat/completions".to_string(), None));
@@ -777,12 +774,12 @@ mod tests {
         let c = thinking_client(&base, ThinkingSetting::Off);
         let count = || seen.lock().unwrap().iter().filter(|(p, _)| p == "/v1/chat/completions").count();
 
-        let _ = c.open_chat_stream(&hi(), "retry-custom-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&hi(), &hi(), "retry-custom-model", &GenerationParams::default()).await;
         assert_eq!(count(), 2, "one try with the parameter, one without");
         assert!(thinking::is_known_unsupported("custom", &base, "retry-custom-model"));
 
         // The next request does not try the parameter again.
-        let _ = c.open_chat_stream(&hi(), "retry-custom-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&hi(), &hi(), "retry-custom-model", &GenerationParams::default()).await;
         assert_eq!(count(), 3);
     }
 
@@ -821,12 +818,12 @@ mod tests {
         .await;
         let c = thinking_client(&base, ThinkingSetting::Off);
         let count = || seen.lock().unwrap().iter().filter(|(p, _)| p == "/v1/api/chat").count();
-        let _ = c.open_chat_stream(&hi(), "native-retry-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&hi(), &hi(), "native-retry-model", &GenerationParams::default()).await;
         assert_eq!(count(), 2, "one try with think, one without");
         assert!(thinking::is_known_unsupported("custom:/api/chat", &base, "native-retry-model"));
         // The other endpoint's memory is separate: /chat/completions never rejected anything.
         assert!(!thinking::is_known_unsupported("custom", &base, "native-retry-model"));
-        let _ = c.open_chat_stream(&hi(), "native-retry-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&hi(), &hi(), "native-retry-model", &GenerationParams::default()).await;
         assert_eq!(count(), 3, "remembered: no more retry");
     }
 
@@ -835,12 +832,12 @@ mod tests {
         let (old_base, _) =
             server(vec![("/v1/chat/completions", 400, r#"{"error":"unknown field reasoning_effort"}"#)]).await;
         let c = thinking_client(&old_base, ThinkingSetting::Off);
-        let _ = c.open_chat_stream(&hi(), "shared-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&hi(), &hi(), "shared-model", &GenerationParams::default()).await;
         assert!(thinking::is_known_unsupported("custom", &old_base, "shared-model"));
 
         let (new_base, seen) = server(vec![("/v1/chat/completions", 200, "data: [DONE]\n\n")]).await;
         let c = thinking_client(&new_base, ThinkingSetting::Off);
-        c.open_chat_stream(&hi(), "shared-model", &GenerationParams::default()).await.unwrap();
+        c.open_chat_stream(&hi(), &hi(), "shared-model", &GenerationParams::default()).await.unwrap();
         assert_eq!(seen.lock().unwrap().len(), 1);
         assert!(!thinking::is_known_unsupported("custom", &new_base, "shared-model"));
         assert!(thinking::should_send("custom", &new_base, "shared-model", ThinkingSetting::Off));
@@ -850,7 +847,7 @@ mod tests {
     async fn auto_never_retries() {
         let (base, seen) = server(vec![("/v1/chat/completions", 400, r#"{"error":"reasoning_effort bad"}"#)]).await;
         let c = thinking_client(&base, ThinkingSetting::Auto);
-        let _ = c.open_chat_stream(&hi(), "auto-custom-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&hi(), &hi(), "auto-custom-model", &GenerationParams::default()).await;
         let n = seen.lock().unwrap().iter().filter(|(p, _)| p == "/v1/chat/completions").count();
         assert_eq!(n, 1);
     }
@@ -876,7 +873,7 @@ mod tests {
         let custom = client(&base, CustomAuthType::None, None);
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            custom.open_chat_stream(&hi(), "m", &params),
+            custom.open_chat_stream(&hi(), &hi(), "m", &params),
         )
         .await;
         assert!(matches!(outcome, Ok(Err(LLMError::Cancelled))), "{:?}", outcome.map(|r| r.map(|resp| resp.status())));
@@ -916,7 +913,7 @@ mod tests {
         ];
         let mut ok = Vec::new();
         for (label, client, model) in cases {
-            match client.open_chat_stream(&hi(), model, &params).await {
+            match client.open_chat_stream(&hi(), &hi(), model, &params).await {
                 Ok(response) => {
                     println!("{label}: OK {}", response.status());
                     ok.push(label);

@@ -14,7 +14,8 @@ import { showToast } from "../stores/toastStore";
 import { useConfigStore } from "../stores/configStore";
 
 /** Why a pasted image is refused when the provider can't read images. */
-export const IMAGES_NEED_CLAUDE = "Images work only with Claude (subscription). Choose it in Settings > LLM.";
+export const IMAGES_NEED_VISION =
+  "Images work only with Claude (subscription) or a local model (Ollama, LM Studio or a custom endpoint). Choose one in Settings > LLM.";
 
 /**
  * The Ask box placeholder. Short enough to show whole in the overlay's Ask box
@@ -26,9 +27,10 @@ export function askPlaceholder(canAttach: boolean): string {
 
 /**
  * Images pasted (Ctrl+V) into an Ask box. A paste that carries text, or no
- * image, is left alone, so plain text pastes as usual. Only the Claude
- * (subscription) provider can read images: with another one a pasted image is
- * refused with a hint instead of being attached and failing on send.
+ * image, is left alone, so plain text pastes as usual. Only a provider that
+ * reads images (Claude's session, or a local/custom model) can take one: with
+ * another one a pasted image is refused with a hint instead of being attached
+ * and failing on send.
  */
 export function useAskImages() {
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -49,7 +51,7 @@ export function useAskImages() {
   const attach = useCallback((files: File[]): boolean => {
     if (files.length === 0) return false;
     if (!providerReadsImages(useConfigStore.getState().llmProvider)) {
-      showToast(IMAGES_NEED_CLAUDE, "warning");
+      showToast(IMAGES_NEED_VISION, "warning");
       return false;
     }
     const accepted: File[] = [];

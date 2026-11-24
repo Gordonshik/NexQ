@@ -246,7 +246,7 @@ describe("ModeButtons Ask box with a pasted image", () => {
     window.removeEventListener("keydown", onWindowKey);
   });
 
-  it("names the paste shortcut only with Claude (subscription)", () => {
+  it("names the paste shortcut only with a provider that reads images", () => {
     const { unmount } = render(<ModeButtons />);
     openAsk();
     expect(input().placeholder).toBe("Ask or paste a screenshot");

@@ -449,8 +449,8 @@ mod thinking_tests {
 
     fn body(model: &str, setting: ThinkingSetting, with: bool) -> (serde_json::Value, bool) {
         let messages = vec![
-            LLMMessage { role: "system".into(), content: "sys".into() },
-            LLMMessage { role: "user".into(), content: "hi".into() },
+            LLMMessage::text("system", "sys"),
+            LLMMessage::text("user", "hi"),
         ];
         build_messages_body(&messages, model, &GenerationParams::default(), setting, with)
     }

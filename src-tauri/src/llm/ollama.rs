@@ -6,7 +6,8 @@ use std::time::Instant;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
-    cancellable, check_cancelled, is_cancelled, emit_end_with_stats, emit_error, emit_token, TokenSink,
+    cancellable, check_cancelled, is_cancelled, emit_end_with_stats, emit_error, emit_token,
+    ollama_message_json, TokenSink,
 };
 use super::stream_parser::{LineBuffer, NDJSONParser};
 use super::thinking::{self, RequestOptions, Sent, ThinkingSetting};
@@ -27,10 +28,7 @@ pub(crate) fn build_chat_body(
     extra: Option<&serde_json::Map<String, serde_json::Value>>,
     with_thinking: bool,
 ) -> (serde_json::Value, bool) {
-    let msgs: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|m| json!({ "role": m.role, "content": m.content }))
-        .collect();
+    let msgs: Vec<serde_json::Value> = messages.iter().map(ollama_message_json).collect();
 
     let mut body = json!({
         "model": model,
@@ -305,13 +303,25 @@ mod thinking_tests {
     use crate::llm::thinking::{parse_extra_request, ThinkingSetting::*};
 
     fn user() -> Vec<LLMMessage> {
-        vec![LLMMessage { role: "user".into(), content: "hi".into() }]
+        vec![LLMMessage::text("user", "hi")]
     }
 
     fn body(model: &str, setting: ThinkingSetting, extra: Option<&str>, with: bool) -> (serde_json::Value, bool) {
         let extra = parse_extra_request(extra);
         let params = GenerationParams { temperature: Some(0.3), ..Default::default() };
         build_chat_body(&user(), model, &params, setting, extra.as_ref(), with)
+    }
+
+    #[test]
+    fn an_attached_image_rides_in_the_message_images_array() {
+        let mut message = LLMMessage::text("user", "what is this?");
+        message.images = vec![crate::llm::cli_agent::protocol::ImageAttachment {
+            media_type: "image/png".into(),
+            data: "AAAA".into(),
+        }];
+        let (body, _) = build_chat_body(&[message], "qwen3:8b", &GenerationParams::default(), Auto, None, true);
+        assert_eq!(body["messages"][0]["content"], "what is this?");
+        assert_eq!(body["messages"][0]["images"], json!(["AAAA"]));
     }
 
     #[test]

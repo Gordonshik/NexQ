@@ -129,7 +129,7 @@ export function StealthSettings() {
             </p>
             {!canReadImages && (
               <p className="mt-0.5 text-xs text-warning">
-                Off: this AI can't read images. Use Claude (subscription).
+                Off: this AI can't read images. Use Claude (subscription) or a local model.
               </p>
             )}
           </div>

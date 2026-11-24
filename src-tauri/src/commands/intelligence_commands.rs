@@ -378,15 +378,21 @@ pub(crate) fn is_sources_start_failure(err: &AgentError) -> bool {
     )
 }
 
-/// Why a request with images can't be answered statelessly: another provider
-/// is active (it can't take images; of the CLI agents only Claude does), or it
-/// is Claude but its session isn't available for this request (outage,
-/// fallback, meeting too long).
+/// Whether the stateless path can send an image to this provider: the local
+/// models (Ollama, LM Studio) and custom endpoints. Claude reads images only
+/// through its session, so it can't take one here.
+pub(crate) fn stateless_reads_images(active: Option<&ProviderType>) -> bool {
+    active.is_some_and(|provider| provider.api_reads_images())
+}
+
+/// Why a request with images can't be answered: the provider that would answer
+/// can't take images, or it is Claude but its session isn't available for this
+/// request (outage, fallback, meeting too long).
 pub(crate) fn images_refusal(active: Option<&ProviderType>) -> &'static str {
     if active == Some(&ProviderType::ClaudeCli) {
         "Claude can't read images right now. Try again in a moment, or remove the image and ask again."
     } else {
-        "Images work only with Claude (subscription). Choose it in Settings > LLM, or remove the image and ask again."
+        "Images work only with Claude (subscription) or a local model (Ollama, LM Studio or a custom endpoint). Choose one in Settings > LLM, or remove the image and ask again."
     }
 }
 
@@ -996,8 +1002,9 @@ pub async fn generate_assist(
     // `sources` at all means automatic: Auto-Answer, summaries, background tasks).
     let with_sources = request_with_sources(&state, &mode, &scope, sources);
     let mut route = request_route(&state, &mode, &scope, with_sources);
-    // Only a Claude session carries images: the other CLI agents' requests with
-    // images take the stateless path, which says so.
+    // A Claude session carries images, and so does a provider whose chat API
+    // reads them (local models, custom endpoints). The other CLI agents'
+    // requests with images take the stateless path, which refuses them.
     if !images.is_empty() && matches!(route, Route::ClaudeSession(_)) && !state.cli_settings.active().supports_images() {
         route = Route::Stateless;
     }
@@ -1076,31 +1083,6 @@ pub async fn generate_assist(
             ..GenerationParams::default()
         };
         emit_activity(&app_handle, &params, sources_unavailable_notice());
-    }
-
-    // Only a Claude session carries images; no other route can send them, and
-    // answering without the image would silently ignore what the user attached.
-    if !images.is_empty() {
-        let active = state
-            .llm
-            .as_ref()
-            .and_then(|l| l.lock().ok())
-            .and_then(|r| r.active_provider_type().cloned());
-        let message = images_refusal(active.as_ref()).to_string();
-        // End the stream too: a session attempt above may already have started
-        // it, and the frontend ignores errors for streams it never started, so
-        // this is harmless otherwise (the rejection below reports it then).
-        emit_error(
-            &app_handle,
-            &GenerationParams {
-                request_id: Some(request_id.clone()),
-                cancel: Some(cancel_token.clone()),
-                ..GenerationParams::default()
-            },
-            &message,
-        );
-        drop(generation_guard);
-        return Err(message);
     }
 
     // Determine transcript window: per-action override or global default,
@@ -1191,6 +1173,27 @@ pub async fn generate_assist(
         stateless_provider(&state, &app_handle, &route, &params).await?
     };
 
+    // The provider that will answer must be able to read the image (Claude
+    // only through its session, which the route above already handled):
+    // answering without it would silently ignore what the user attached.
+    if !images.is_empty() && !stateless_reads_images(provider_type.as_ref()) {
+        let message = images_refusal(provider_type.as_ref()).to_string();
+        // End the stream too: a session attempt above may already have started
+        // it, and the frontend ignores errors for streams it never started, so
+        // this is harmless otherwise (the rejection below reports it then).
+        emit_error(
+            &app_handle,
+            &GenerationParams {
+                request_id: Some(request_id.clone()),
+                cancel: Some(cancel_token.clone()),
+                ..GenerationParams::default()
+            },
+            &message,
+        );
+        drop(generation_guard);
+        return Err(message);
+    }
+
     // Check for active Gemini context cache — only applies when Gemini is the provider
     let active_cache_name = if provider_type == Some(ProviderType::Gemini) {
         state.gemini_cache
@@ -1259,6 +1262,7 @@ pub async fn generate_assist(
         include_question,
         include_rag,
         include_instructions,
+        images,
         provider_arc,
         model,
         provider_name,
@@ -1532,10 +1536,32 @@ mod tests {
         assert!(images_refusal(Some(&ProviderType::Openai)).starts_with("Images work only with Claude"));
         assert!(images_refusal(None).starts_with("Images work only with Claude"));
         assert!(images_refusal(Some(&ProviderType::ClaudeCli)).starts_with("Claude can't read images right now"));
-        // Antigravity and Codex sessions never take images: the Claude-only message.
+        // Antigravity and Codex sessions never take images: the Claude-or-local message.
         for other in [ProviderType::AntigravityCli, ProviderType::CodexCli] {
             assert!(images_refusal(Some(&other)).starts_with("Images work only with Claude"));
         }
+        assert!(images_refusal(Some(&ProviderType::Ollama)).contains("local model"));
+    }
+
+    #[test]
+    fn the_stateless_path_reads_images_from_local_and_custom_providers_only() {
+        for provider in [ProviderType::Ollama, ProviderType::LmStudio, ProviderType::Custom] {
+            assert!(stateless_reads_images(Some(&provider)), "{provider:?}");
+        }
+        // Claude reads images through its session, not the stateless prompt.
+        for provider in [
+            ProviderType::ClaudeCli,
+            ProviderType::AntigravityCli,
+            ProviderType::CodexCli,
+            ProviderType::Openai,
+            ProviderType::Anthropic,
+            ProviderType::Groq,
+            ProviderType::Gemini,
+            ProviderType::Openrouter,
+        ] {
+            assert!(!stateless_reads_images(Some(&provider)), "{provider:?}");
+        }
+        assert!(!stateless_reads_images(None));
     }
 
     #[test]

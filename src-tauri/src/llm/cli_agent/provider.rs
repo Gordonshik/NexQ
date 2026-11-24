@@ -394,10 +394,7 @@ mod tests {
     use std::sync::Mutex;
 
     fn msg(role: &str, content: &str) -> LLMMessage {
-        LLMMessage {
-            role: role.to_string(),
-            content: content.to_string(),
-        }
+        LLMMessage::text(role, content)
     }
 
     #[tokio::test]

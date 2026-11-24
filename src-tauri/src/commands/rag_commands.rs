@@ -402,6 +402,7 @@ pub async fn test_rag_answer(
         false,          // include_question
         true,           // include_rag (this is a RAG test)
         false,          // include_instructions
+        Vec::new(),     // images (a test query has none)
         provider_arc,
         model_name,
         provider_name,

@@ -40,12 +40,13 @@ When the thing you need help with is only visible on screen (an exercise, a ques
 
 **Or capture the screen with one key.** During a meeting, press `Ctrl+Shift+S` from any app. NexQ takes a picture of the screen your mouse pointer is on (so it works with the meeting on a second monitor), brings the overlay up, opens the Ask box, attaches the picture and puts the cursor in the Ask box; press Enter to send. Nothing is sent until you do. Windows only for now. Change the key in Settings > General.
 
-- The capture shortcut is on only during a meeting with **Claude (subscription)**. With another provider `Ctrl+Shift+S` stays free for your other apps, and Settings says why the shortcut is off.
+- The capture shortcut is on only during a meeting with a provider that reads images: **Claude (subscription)**, a local model (Ollama, LM Studio) or a custom endpoint. With another provider `Ctrl+Shift+S` stays free for your other apps, and Settings says why the shortcut is off.
 - NexQ's own windows are not hidden or moved for the picture. With **Hide from screen share** on, they are left out of it; otherwise they are in it like any other window. If the overlay was hidden, it comes back once the picture is taken, so it isn't in it.
 - If the capture fails (for example the screen is locked or shows protected video), a short message says so.
 - You can attach up to 3 images (PNG, JPEG, GIF or WebP). NexQ shrinks large ones before sending, so a full-screen screenshot works. Click the **x** on a thumbnail to remove it.
+- With a local or custom model, pick one that reads images (for example `llama3.2-vision`, `qwen2.5vl` or `gemma3` in Ollama, or a vision model in LM Studio); a text-only model can't answer about the picture.
 - With an empty box, the image itself is the question: Claude reads it and answers or solves it, rather than describing it.
-- This works only with **Claude (subscription)**. With another provider, NexQ doesn't attach the image and tells you images need Claude. When Claude is unavailable and NexQ would answer with the fallback provider, it asks you to try again or remove the image, instead of answering without it.
+- This works with **Claude (subscription)**, and with local models (Ollama, LM Studio) and custom endpoints, which read the image through their own chat API. With another provider, NexQ doesn't attach the image and names the providers that can read one. When Claude is unavailable and NexQ would answer with the fallback provider, it asks you to try again or remove the image, instead of answering without it (unless that fallback provider reads images).
 - If the send fails, your text and images stay in the Ask box so you can send again.
 - Images are not replayed if NexQ has to restart the Claude session; only the text is.
 
@@ -96,7 +97,7 @@ On Windows, write the server exactly as its README does, for example `{"command"
 - NexQ never reads your `~/.claude` folder, your credentials, or any tokens. Sign-in happens only in Claude's own tool.
 - NexQ runs the unmodified `claude` program with all tools disabled, in an empty private folder. Claude cannot read your files, run commands, or browse on NexQ's behalf. The one exception is the notes folders and tool servers you add under [Personal sources](#personal-sources): a session that may use them can read those folders and call the tools you switched on, nothing else. What it reads there goes to Anthropic like the transcript does.
 - Claude API environment variables (such as `ANTHROPIC_API_KEY`) are removed from the process, so NexQ never passes an API key to Claude. The session uses whatever account you logged in with: if that login bills an API account rather than a Pro or Max plan, Settings and the footer show "This Claude login bills an API account, not your subscription." (amber, never "Connected"). It still works, at API prices; log in with your Claude account to use your subscription instead.
-- Images you paste or capture into Ask go to Anthropic with your question, like the transcript. A screenshot can include other people's video or documents. NexQ doesn't save them; the AI Log keeps only the text.
+- Images you paste or capture into Ask go to the provider you chose (Anthropic for Claude) with your question, like the transcript. A screenshot can include other people's video or documents. NexQ doesn't save them; the AI Log keeps only the text.
 - Transcript and context text you send is processed by Anthropic under your Claude account's terms, like any Claude conversation. Choose a local provider (Ollama, local Whisper) if audio and text must stay on your machine.
 
 ## Troubleshooting

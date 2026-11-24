@@ -175,9 +175,11 @@ describe("clipboardHasText", () => {
 });
 
 describe("providerReadsImages", () => {
-  it("is true only for Claude (subscription)", () => {
-    expect(providerReadsImages("claude_cli")).toBe(true);
-    for (const other of ["openai", "anthropic", "ollama", "groq", "custom", ""]) {
+  it("is true for Claude (subscription) and the local and custom providers", () => {
+    for (const provider of ["claude_cli", "ollama", "lm_studio", "custom"]) {
+      expect(providerReadsImages(provider)).toBe(true);
+    }
+    for (const other of ["openai", "anthropic", "groq", "gemini", "openrouter", "antigravity_cli", "codex_cli", ""]) {
       expect(providerReadsImages(other)).toBe(false);
     }
   });

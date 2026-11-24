@@ -118,6 +118,14 @@ impl ProviderType {
         self.cli_agent_kind().is_some()
     }
 
+    /// Whether this provider's chat API carries an image attached to a
+    /// question: the local models (Ollama, LM Studio) and custom endpoints.
+    /// Claude reads images too, but only through its session, never the
+    /// stateless prompt (see `CliAgentKind::supports_images`).
+    pub fn api_reads_images(&self) -> bool {
+        matches!(self, Self::Ollama | Self::LmStudio | Self::Custom)
+    }
+
     /// Which CLI agent this provider drives, if it is one.
     pub fn cli_agent_kind(&self) -> Option<cli_agent::CliAgentKind> {
         match self {

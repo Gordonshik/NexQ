@@ -369,8 +369,8 @@ mod tests {
 
     fn msgs() -> Vec<LLMMessage> {
         vec![
-            LLMMessage { role: "system".into(), content: "Be brief.".into() },
-            LLMMessage { role: "user".into(), content: "hi".into() },
+            LLMMessage::text("system", "Be brief."),
+            LLMMessage::text("user", "hi"),
         ]
     }
 
@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(other[0].content, "Be brief.");
 
         // No system message: the last user message carries it.
-        let mut user_only = vec![LLMMessage { role: "user".into(), content: "q".into() }];
+        let mut user_only = vec![LLMMessage::text("user", "q")];
         apply_prompt_hint(&mut user_only, "qwen3:8b", Off);
         assert_eq!(user_only[0].content, "q\n/no_think");
     }

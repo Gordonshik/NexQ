@@ -488,10 +488,7 @@ async fn translate_via_llm(
         src_label, target, text
     );
 
-    let messages = vec![crate::llm::provider::LLMMessage {
-        role: "user".to_string(),
-        content: prompt,
-    }];
+    let messages = vec![crate::llm::provider::LLMMessage::text("user", prompt)];
 
     let provider_arc = {
         let router = llm_arc.lock().map_err(|_| "LLM lock poisoned")?;

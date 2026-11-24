@@ -1,6 +1,6 @@
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AskImageChips, IMAGES_NEED_CLAUDE, askPlaceholder, useAskImages } from "./AskImages";
+import { AskImageChips, IMAGES_NEED_VISION, askPlaceholder, useAskImages } from "./AskImages";
 import { MAX_IMAGES } from "../lib/imageAttachments";
 import { useConfigStore } from "../stores/configStore";
 import { useToastStore } from "../stores/toastStore";
@@ -44,6 +44,14 @@ describe("useAskImages", () => {
     await waitFor(() => expect(result.current.announcement).toBe("Image attached (1 of 3)"));
   });
 
+  it("attaches a paste with a local model", async () => {
+    useConfigStore.setState({ llmProvider: "ollama" });
+    const { result } = renderHook(() => useAskImages());
+    expect(result.current.canAttach).toBe(true);
+    await act(async () => result.current.onPaste(paste([png("a")]).event));
+    await waitFor(() => expect(result.current.images).toHaveLength(1));
+  });
+
   it("with another provider takes the paste, attaches nothing and warns", async () => {
     useConfigStore.setState({ llmProvider: "openai" });
     const { result } = renderHook(() => useAskImages());
@@ -54,7 +62,7 @@ describe("useAskImages", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.images).toHaveLength(0);
     expect(useToastStore.getState().toasts).toEqual([
-      expect.objectContaining({ message: IMAGES_NEED_CLAUDE, type: "warning" }),
+      expect.objectContaining({ message: IMAGES_NEED_VISION, type: "warning" }),
     ]);
   });
 
@@ -126,7 +134,7 @@ describe("useAskImages", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.images).toHaveLength(0);
     expect(useToastStore.getState().toasts).toEqual([
-      expect.objectContaining({ message: IMAGES_NEED_CLAUDE, type: "warning" }),
+      expect.objectContaining({ message: IMAGES_NEED_VISION, type: "warning" }),
     ]);
   });
 
