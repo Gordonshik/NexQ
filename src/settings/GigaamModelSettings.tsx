@@ -112,16 +112,27 @@ export function GigaamModelSettings({ onStatusChange }: GigaamModelSettingsProps
         <h3 id="gigaam-model-title" className="text-sm font-semibold text-primary/80">{GIGAAM_NAME} Model</h3>
       </div>
       <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
-        Choose one exported v3 e2e RNNT folder for both You and Them. Both channels share the same loaded model and transcribe Russian ({GIGAAM_LANGUAGE}) only.
+        Enter or choose one exported v3 e2e RNNT folder for both You and Them. Both channels share the same loaded model and transcribe Russian ({GIGAAM_LANGUAGE}) only.
       </p>
 
-      <div className="rounded-lg border border-border/40 bg-background/60 px-3.5 py-2.5">
-        <span className="mb-1 block text-meta font-medium uppercase tracking-wide text-muted-foreground/70">Model folder</span>
-        {draftPath ? (
-          <code className="block break-all text-xs text-foreground">{draftPath}</code>
-        ) : (
-          <span className="text-xs text-muted-foreground">No folder selected</span>
-        )}
+      <div className="rounded-lg border border-border/40 bg-background/60 p-3.5">
+        <label htmlFor="gigaam-model-path" className="mb-1.5 block text-meta font-medium uppercase tracking-wide text-muted-foreground/70">Model folder</label>
+        <input
+          id="gigaam-model-path"
+          type="text"
+          value={draftPath}
+          onChange={(event) => {
+            setDraftPath(event.target.value);
+            setInfo(null);
+            setError("");
+          }}
+          disabled={loading}
+          placeholder="Paste the full model folder path"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={error ? true : undefined}
+          className="w-full rounded-md border border-border/50 bg-background px-3 py-2 font-mono text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -132,6 +143,9 @@ export function GigaamModelSettings({ onStatusChange }: GigaamModelSettingsProps
         <button type="button" onClick={chooseFolder} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
           <FolderOpen className="h-3.5 w-3.5" />
           Choose Folder
+        </button>
+        <button type="button" onClick={() => void validate(draftPath, true)} disabled={loading || !draftPath.trim()} className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
+          Apply Path
         </button>
         <button type="button" onClick={() => void validate(draftPath, false)} disabled={loading || !draftPath.trim()} className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
           <RefreshCw className="h-3.5 w-3.5" />
