@@ -307,8 +307,8 @@ pub async fn ask_meeting(
         })
     };
     let messages = vec![
-        LLMMessage { role: "system".into(), content: system_prompt },
-        LLMMessage { role: "user".into(), content: user_prompt },
+        LLMMessage::text("system", system_prompt),
+        LLMMessage::text("user", user_prompt),
     ];
     let result = {
         let provider = provider.lock().await;

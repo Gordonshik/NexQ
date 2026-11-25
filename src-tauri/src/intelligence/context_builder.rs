@@ -51,10 +51,7 @@ impl ContextBuilder {
         // Already contains: per-action editable prompt + composed instructions
         // (tone/format/length/custom text) if `include_custom_instructions` is on.
         // This is fully configurable from the settings page.
-        messages.push(LLMMessage {
-            role: "system".to_string(),
-            content: system_prompt.to_string(),
-        });
+        messages.push(LLMMessage::text("system", system_prompt));
 
         // 2. User message — ONLY data sections, NO hardcoded instructions.
         // Each section is independently togglable per action.
@@ -98,10 +95,7 @@ impl ContextBuilder {
         }
 
         let user_content = user_parts.join("\n");
-        messages.push(LLMMessage {
-            role: "user".to_string(),
-            content: user_content,
-        });
+        messages.push(LLMMessage::text("user", user_content));
 
         messages
     }

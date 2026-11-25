@@ -119,6 +119,7 @@ export function ModeButtons() {
     images: askImages,
     sending: askSending,
     setSending: setAskSending,
+    preparing: askPreparing,
     canAttach: canAttachImage,
     announcement: askAnnouncement,
     onPaste: onAskPaste,
@@ -172,7 +173,7 @@ export function ModeButtons() {
   }, [focusAsk, locked, askInputVisible]);
 
   const handleAskSubmit = useCallback(() => {
-    if (locked) return;
+    if (locked || askPreparing) return;
     // A screenshot taken while this request is on its way is not part of it.
     const carried = askSending ? [] : askImages;
     const sent = sendAsk({
@@ -187,7 +188,7 @@ export function ModeButtons() {
     if (!sent) return;
     setAskInputText("");
     setAskInputVisible(false);
-  }, [askInputText, askImages, askSending, locked, removeSentImages, setAskSending]);
+  }, [askInputText, askImages, askSending, askPreparing, locked, removeSentImages, setAskSending]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -259,7 +260,7 @@ export function ModeButtons() {
           />
           <button
             onClick={handleAskSubmit}
-            disabled={!askInputText.trim() && (askImages.length === 0 || askSending)}
+            disabled={askPreparing || (!askInputText.trim() && (askImages.length === 0 || askSending))}
             className="rounded-md p-1 text-info/60 hover:bg-info/10 hover:text-info disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             aria-label="Send question"
           >

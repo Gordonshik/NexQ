@@ -6,6 +6,7 @@ use crate::intelligence::action_config::{AllActionConfigs, InstructionPresets};
 use crate::intelligence::context_scope::{self, ResolvedScope, TranscriptWindow};
 use crate::intelligence::IntelligenceEngine;
 use crate::llm::cli_agent::context::Seg;
+use crate::llm::cli_agent::detect::{format_version, MIN_CLAUDE_VERSION};
 use crate::llm::cli_agent::manager::{OnDelta, SessionKey, SessionScope};
 use crate::llm::cli_agent::session::{decode_activity, decode_tool_result, AgentError};
 use crate::sources::activity::{describe_tool_use, notice, SourceActivity};
@@ -374,19 +375,31 @@ pub(crate) fn is_sources_start_failure(err: &AgentError) -> bool {
         AgentError::Spawn(_) | AgentError::NoUsableSources { .. } | AgentError::Timeout | AgentError::Crashed(_)
     ) && !matches!(
         err.kind(),
-        AgentErrorKind::NotInstalled | AgentErrorKind::NotLoggedIn | AgentErrorKind::RateLimited
+        AgentErrorKind::NotInstalled | AgentErrorKind::Outdated | AgentErrorKind::NotLoggedIn | AgentErrorKind::RateLimited
     )
 }
 
-/// Why a request with images can't be answered statelessly: another provider
-/// is active (it can't take images; of the CLI agents only Claude does), or it
-/// is Claude but its session isn't available for this request (outage,
-/// fallback, meeting too long).
-pub(crate) fn images_refusal(active: Option<&ProviderType>) -> &'static str {
+/// Whether the stateless path can send an image to this provider: the local
+/// models (Ollama, LM Studio) and custom endpoints. Claude reads images only
+/// through its session, so it can't take one here.
+pub(crate) fn stateless_reads_images(active: Option<&ProviderType>) -> bool {
+    active.is_some_and(|provider| provider.api_reads_images())
+}
+
+/// Why a request with images can't be answered: the provider that would answer
+/// can't take images, or it is Claude but its session isn't available for this
+/// request (outage, fallback, meeting too long).
+pub(crate) fn images_refusal(active: Option<&ProviderType>, health: ClaudeHealth) -> String {
     if active == Some(&ProviderType::ClaudeCli) {
-        "Claude can't read images right now. Try again in a moment, or remove the image and ask again."
+        if health == ClaudeHealth::Unavailable(AgentErrorKind::Outdated) {
+            return format!(
+                "Claude Code is too old for NexQ. Update it to {} or newer, choose a vision-capable fallback in Settings > LLM Providers, or remove the image and ask again.",
+                format_version(MIN_CLAUDE_VERSION)
+            );
+        }
+        "Claude can't read images right now. Try again in a moment, or remove the image and ask again.".to_string()
     } else {
-        "Images work only with Claude (subscription). Choose it in Settings > LLM, or remove the image and ask again."
+        "Images work only with Claude (subscription) or a vision-capable model (Ollama, LM Studio or a Custom endpoint). Choose one in Settings > LLM, or remove the image and ask again.".to_string()
     }
 }
 
@@ -996,8 +1009,9 @@ pub async fn generate_assist(
     // `sources` at all means automatic: Auto-Answer, summaries, background tasks).
     let with_sources = request_with_sources(&state, &mode, &scope, sources);
     let mut route = request_route(&state, &mode, &scope, with_sources);
-    // Only a Claude session carries images: the other CLI agents' requests with
-    // images take the stateless path, which says so.
+    // A Claude session carries images, and so does a provider whose chat API
+    // reads them (local models, custom endpoints). The other CLI agents'
+    // requests with images take the stateless path, which refuses them.
     if !images.is_empty() && matches!(route, Route::ClaudeSession(_)) && !state.cli_settings.active().supports_images() {
         route = Route::Stateless;
     }
@@ -1076,31 +1090,6 @@ pub async fn generate_assist(
             ..GenerationParams::default()
         };
         emit_activity(&app_handle, &params, sources_unavailable_notice());
-    }
-
-    // Only a Claude session carries images; no other route can send them, and
-    // answering without the image would silently ignore what the user attached.
-    if !images.is_empty() {
-        let active = state
-            .llm
-            .as_ref()
-            .and_then(|l| l.lock().ok())
-            .and_then(|r| r.active_provider_type().cloned());
-        let message = images_refusal(active.as_ref()).to_string();
-        // End the stream too: a session attempt above may already have started
-        // it, and the frontend ignores errors for streams it never started, so
-        // this is harmless otherwise (the rejection below reports it then).
-        emit_error(
-            &app_handle,
-            &GenerationParams {
-                request_id: Some(request_id.clone()),
-                cancel: Some(cancel_token.clone()),
-                ..GenerationParams::default()
-            },
-            &message,
-        );
-        drop(generation_guard);
-        return Err(message);
     }
 
     // Determine transcript window: per-action override or global default,
@@ -1191,6 +1180,27 @@ pub async fn generate_assist(
         stateless_provider(&state, &app_handle, &route, &params).await?
     };
 
+    // The provider that will answer must be able to read the image (Claude
+    // only through its session, which the route above already handled):
+    // answering without it would silently ignore what the user attached.
+    if !images.is_empty() && !stateless_reads_images(provider_type.as_ref()) {
+        let message = images_refusal(provider_type.as_ref(), state.claude_health.get());
+        // End the stream too: a session attempt above may already have started
+        // it, and the frontend ignores errors for streams it never started, so
+        // this is harmless otherwise (the rejection below reports it then).
+        emit_error(
+            &app_handle,
+            &GenerationParams {
+                request_id: Some(request_id.clone()),
+                cancel: Some(cancel_token.clone()),
+                ..GenerationParams::default()
+            },
+            &message,
+        );
+        drop(generation_guard);
+        return Err(message);
+    }
+
     // Check for active Gemini context cache — only applies when Gemini is the provider
     let active_cache_name = if provider_type == Some(ProviderType::Gemini) {
         state.gemini_cache
@@ -1259,6 +1269,7 @@ pub async fn generate_assist(
         include_question,
         include_rag,
         include_instructions,
+        images,
         provider_arc,
         model,
         provider_name,
@@ -1529,13 +1540,45 @@ mod tests {
 
     #[test]
     fn images_refusal_names_the_provider_problem() {
-        assert!(images_refusal(Some(&ProviderType::Openai)).starts_with("Images work only with Claude"));
-        assert!(images_refusal(None).starts_with("Images work only with Claude"));
-        assert!(images_refusal(Some(&ProviderType::ClaudeCli)).starts_with("Claude can't read images right now"));
-        // Antigravity and Codex sessions never take images: the Claude-only message.
+        assert!(images_refusal(Some(&ProviderType::Openai), ClaudeHealth::Healthy).starts_with("Images work only with Claude"));
+        assert!(images_refusal(None, ClaudeHealth::Healthy).starts_with("Images work only with Claude"));
+        assert!(images_refusal(Some(&ProviderType::ClaudeCli), ClaudeHealth::Healthy).starts_with("Claude can't read images right now"));
+        // Antigravity and Codex sessions never take images: the Claude-or-vision message.
         for other in [ProviderType::AntigravityCli, ProviderType::CodexCli] {
-            assert!(images_refusal(Some(&other)).starts_with("Images work only with Claude"));
+            assert!(images_refusal(Some(&other), ClaudeHealth::Healthy).starts_with("Images work only with Claude"));
         }
+        assert!(images_refusal(Some(&ProviderType::Ollama), ClaudeHealth::Healthy).contains("vision-capable model"));
+        assert!(images_refusal(Some(&ProviderType::Openai), ClaudeHealth::Healthy).contains("Custom endpoint"));
+    }
+
+    #[test]
+    fn an_outdated_claude_image_refusal_says_to_update_or_choose_a_vision_fallback() {
+        let message = images_refusal(Some(&ProviderType::ClaudeCli), ClaudeHealth::Unavailable(AgentErrorKind::Outdated));
+        assert!(message.contains("Claude Code is too old"), "{message}");
+        assert!(message.contains("2.1.259 or newer"), "{message}");
+        assert!(message.contains("vision-capable fallback"), "{message}");
+        assert!(!message.contains("Try again in a moment"), "{message}");
+    }
+
+    #[test]
+    fn the_stateless_path_reads_images_from_local_and_custom_providers_only() {
+        for provider in [ProviderType::Ollama, ProviderType::LmStudio, ProviderType::Custom] {
+            assert!(stateless_reads_images(Some(&provider)), "{provider:?}");
+        }
+        // Claude reads images through its session, not the stateless prompt.
+        for provider in [
+            ProviderType::ClaudeCli,
+            ProviderType::AntigravityCli,
+            ProviderType::CodexCli,
+            ProviderType::Openai,
+            ProviderType::Anthropic,
+            ProviderType::Groq,
+            ProviderType::Gemini,
+            ProviderType::Openrouter,
+        ] {
+            assert!(!stateless_reads_images(Some(&provider)), "{provider:?}");
+        }
+        assert!(!stateless_reads_images(None));
     }
 
     #[test]
@@ -1653,6 +1696,10 @@ mod tests {
         assert!(!is_sources_start_failure(&AgentError::Cli(AgentErrorKind::RateLimited, "limit".into())));
         assert!(!is_sources_start_failure(&AgentError::Spawn("Claude CLI not installed: claude.exe not found".into())));
         assert!(!is_sources_start_failure(&AgentError::Crashed("Not logged in. Please run /login".into())));
+        // A Claude that is too old is an outage of Claude, not of the sources.
+        assert!(!is_sources_start_failure(&AgentError::Spawn(
+            "Claude Code 2.1.206 is too old for NexQ. Update it to 2.1.259 or newer.".into()
+        )));
         assert!(!is_sources_start_failure(&AgentError::Cancelled));
     }
 

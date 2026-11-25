@@ -72,6 +72,23 @@ describe("captureScreenIntoAsk", () => {
     expect(messages()).toEqual([]);
   });
 
+  it("captures for a custom endpoint without requiring Claude", async () => {
+    useConfigStore.setState({ llmProvider: "custom" });
+    const files: File[] = [];
+    const listener = (e: Event) => {
+      files.push(...takePendingScreenshots());
+      e.preventDefault();
+    };
+    window.addEventListener(SCREENSHOT_EVENT, listener);
+    await captureScreenIntoAsk();
+    window.removeEventListener(SCREENSHOT_EVENT, listener);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].type).toBe("image/png");
+    expect(overlay.shown).toBe(1);
+    expect(messages()).toEqual([]);
+  });
+
   it("runs the show path on every press (the overlay may be visible but not focused), after the capture", async () => {
     capture.mockImplementation(async () => {
       overlay.log.push("capture");

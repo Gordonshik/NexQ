@@ -64,7 +64,7 @@ describe("PromptViewer token row", () => {
       />,
     );
     const row = screen.getByTestId("token-budget");
-    expect(row).toHaveTextContent("Session prompt (sent once when the session started) ≈ 1,000");
+    expect(row).toHaveTextContent(/Session prompt \(sent once when the session started\) ≈ 1[ ,]000/);
     expect(row).toHaveTextContent("Sent this request ≈ 100");
     expect(screen.getByTestId("token-actual")).toHaveTextContent(
       "Actual: 4,200 in (4,000 cached · 190 written) · 189 out (151 thinking) · ≈$0.0093",

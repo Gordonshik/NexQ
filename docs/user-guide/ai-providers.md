@@ -100,7 +100,7 @@ Changing a side's language during a meeting briefly restarts transcription, the 
 
 ![LLM Providers settings panel](../../website/public/screenshots/Setting/Setting-LLM%20Providers.png)
 
-NexQ supports 9 LLM providers. The LLM powers all AI features: Assist, What to Say, Shorten, Follow-Up, Recap, Ask Question, Meeting Summary, and Action Items.
+NexQ supports 11 LLM providers. The LLM powers all AI features: Assist, What to Say, Shorten, Follow-Up, Recap, Ask Question, Meeting Summary, and Action Items.
 
 | Provider | Type | Cost | Speed | Best For |
 |----------|------|------|-------|----------|
@@ -126,7 +126,7 @@ NexQ supports 9 LLM providers. The LLM powers all AI features: Assist, What to S
 
 **Use Claude (subscription, Beta)** if you already pay for Claude Pro or Max and want to use it without an API key. See the [Claude subscription guide](claude-subscription.md).
 
-**Use Antigravity or Codex (subscription, Beta)** the same way if you pay for Google AI or ChatGPT. Install the CLI (Antigravity from antigravity.google, Codex with `npm i -g @openai/codex`), sign in once with the Log in button in Settings > LLM Providers, then pick Fast and Deep models there. NexQ fetches each CLI's current model list every time it starts. Notes folders and MCP servers from Personal Sources work with all three. Antigravity and Codex read your notes only through NexQ's own read-only notes tool, and they can't run commands, write files or search the web. Image attachments still need Claude.
+**Use Codex (subscription, Beta)** if you pay for ChatGPT. Install the CLI with `npm i -g @openai/codex`, sign in once with the Log in button in Settings > LLM Providers, then pick Fast and Deep models there. NexQ fetches its current model list every time it starts. Notes folders and MCP servers from Personal Sources work with Claude, Antigravity and Codex. Antigravity and Codex read your notes only through NexQ's own read-only notes tool, and they can't run commands, write files or search the web. Image attachments (a pasted screenshot or `Ctrl+Shift+S`) need Claude, a vision-capable local model such as Ollama or LM Studio, or a custom endpoint that reads images; Antigravity and Codex can't take them.
 
 **Use Anthropic (Claude)** if you prefer nuanced, well-reasoned responses, especially for complex or sensitive topics.
 
@@ -234,6 +234,8 @@ The Custom provider talks to any service that follows the OpenAI API, not only l
 5. Click **Use Custom for AI responses**.
 
 The same steps work for other OpenAI-compatible services: use the base URL from the service's documentation. If you would rather use one key for many models, choose the **OpenRouter** provider instead of Custom.
+
+Screenshot and pasted-image analysis with Custom requires both a vision-capable (multimodal) model and an endpoint that accepts image input. NexQ sends images to OpenAI-compatible endpoints as `image_url` content parts containing base64 data URLs; when it falls back to Ollama's native `/api/chat`, it uses the message's `images` array with raw base64. A text-only model or an endpoint without vision support cannot analyze screenshots.
 
 ## Tips
 
