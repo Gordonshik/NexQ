@@ -13,7 +13,7 @@ export const STT_GROUPS: { id: SttGroupId; label: string; menuLabel: string; not
   { id: "cloud", label: "Cloud", menuLabel: "Cloud", note: "Requires API key" },
 ];
 
-const DEVICE: readonly STTProviderType[] = ["sherpa_onnx", "ort_streaming", "whisper_cpp", "parakeet_tdt"];
+const DEVICE: readonly STTProviderType[] = ["sherpa_onnx", "ort_streaming", "whisper_cpp", "parakeet_tdt", "gigaam"];
 const BUILTIN: readonly STTProviderType[] = ["web_speech", "windows_native"];
 
 export function sttGroup(provider: STTProviderType): SttGroupId {

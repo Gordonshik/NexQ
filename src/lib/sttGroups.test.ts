@@ -11,7 +11,7 @@ describe("speech engine groups", () => {
   });
 
   it("keep the local engines on this computer", () => {
-    for (const p of ["sherpa_onnx", "ort_streaming", "whisper_cpp", "parakeet_tdt"] as const) {
+    for (const p of ["sherpa_onnx", "ort_streaming", "whisper_cpp", "parakeet_tdt", "gigaam"] as const) {
       expect(sttGroup(p), p).toBe("device");
     }
   });

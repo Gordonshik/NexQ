@@ -58,7 +58,7 @@ It transcribes both sides of a call live and answers from your own notes, with l
 - **Two sides, one transcript.** Your mic ("You") and the call audio ("Them") are separate streams. Each has its own speech engine, language and mute, so answers know who said what.
 - **Answers in the moment.** Questions are caught as they are asked. Press one key, or turn on Auto-Answer, and the answer streams in, grounded in your notes, slides or other files.
 - **Yours to run.** Free, MIT licensed, no account and no usage caps. No bot joins your call. Use fully offline engines or the cloud providers you pick.
-- **Bring your own models.** 12 speech-to-text engines and 11 LLM providers, including your existing Claude, Google AI or ChatGPT subscription.
+- **Bring your own models.** 13 speech-to-text engines and 11 LLM providers, including your existing Claude, Google AI or ChatGPT subscription.
 - **Private notes while you present.** Hide from screen share (off by default) leaves the overlay out of screen shares and recordings, and off the taskbar or Dock. See [Use it responsibly](#use-it-responsibly).
 
 ## Quick start
@@ -166,7 +166,7 @@ Audio is captured on your machine. What leaves it depends on the engines you pic
 
 | | Runs on your device | Cloud |
 |---|---|---|
-| **Speech-to-text (12)** | Parakeet TDT, Sherpa-ONNX, ORT Streaming, Whisper.cpp (recordings only, not live calls) | Deepgram, Groq Whisper, Whisper API, Azure Speech, Azure MAI Streaming (public preview), Cartesia, Web Speech (no key, mic only), Windows Speech (no key, Windows, mic only) |
+| **Speech-to-text (13)** | Parakeet TDT, Sherpa-ONNX, ORT Streaming, GigaAM (local ONNX export, Russian), Whisper.cpp (recordings only, not live calls) | Deepgram, Groq Whisper, Whisper API, Azure Speech, Azure MAI Streaming (public preview), Cartesia, Web Speech (no key, mic only), Windows Speech (no key, Windows, mic only) |
 | **LLM (11)** | Ollama, LM Studio | OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, any custom endpoint, and, with no API key (beta): Claude through your Pro or Max plan (Claude Code CLI), Antigravity through your Google AI plan, Codex through your ChatGPT plan |
 | **Translation (5)** | OPUS-MT (offline) | DeepL, Google, Microsoft, or any LLM you configured |
 

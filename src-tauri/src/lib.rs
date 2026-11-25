@@ -575,6 +575,8 @@ pub fn run() {
             stt_commands::set_stt_language,
             stt_commands::test_stt_connection,
             stt_commands::get_available_stt_providers,
+            stt_commands::detect_gigaam_model,
+            stt_commands::validate_gigaam_model,
             stt_commands::update_whisper_dual_pass_config,
             stt_commands::estimate_deepgram_cost,
             stt_commands::update_deepgram_config,

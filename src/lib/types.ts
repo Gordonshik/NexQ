@@ -533,7 +533,8 @@ export type STTProviderType =
   | "sherpa_onnx"
   | "ort_streaming"
   | "windows_native"
-  | "parakeet_tdt";
+  | "parakeet_tdt"
+  | "gigaam";
 
 // == LOCAL STT ENGINE TYPES ==
 
@@ -579,6 +580,16 @@ export interface STTProviderConfig {
   is_local: boolean;
 }
 
+export interface GigaAmModelInfo {
+  model_dir: string;
+  model_name: string;
+  sample_rate: number;
+  features: number;
+  vocabulary_size: number;
+  num_classes: number;
+  warnings?: string[];
+}
+
 // == TWO-PARTY AUDIO MODEL ==
 
 export type PartyRole = "You" | "Them";
@@ -589,6 +600,7 @@ export interface PartyAudioConfig {
   is_input_device: boolean;
   stt_provider: STTProviderType;
   local_model_id?: string;
+  local_model_path?: string;
   /**
    * Transcription language for this side only (an STT_LANGUAGES value, "auto"
    * included). Absent means the shared transcription language, as in configs

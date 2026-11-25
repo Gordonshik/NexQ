@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useConfigStore } from "../../stores/configStore";
 import { RESERVED_SHORTCUTS, formatShortcut } from "../../lib/shortcutLabel";
+import { GIGAAM_NAME } from "../../lib/gigaam";
 
 interface ReadyStepProps {
   onStartMeeting: () => void;
@@ -73,7 +74,9 @@ export function ReadyStep({
               <span className="text-muted-foreground">
                 {meetingAudioConfig.you.stt_provider === "web_speech"
                   ? "Web Speech API"
-                  : meetingAudioConfig.you.stt_provider.replace("_", " ")}
+                  : meetingAudioConfig.you.stt_provider === "gigaam"
+                    ? GIGAAM_NAME
+                    : meetingAudioConfig.you.stt_provider.replace("_", " ")}
               </span>
             </div>
             <div className="flex items-center gap-2 text-xs">
@@ -82,7 +85,9 @@ export function ReadyStep({
               <span className="text-muted-foreground">
                 {meetingAudioConfig.them.stt_provider === "web_speech"
                   ? "Web Speech API"
-                  : meetingAudioConfig.them.stt_provider.replace("_", " ")}
+                  : meetingAudioConfig.them.stt_provider === "gigaam"
+                    ? GIGAAM_NAME
+                    : meetingAudioConfig.them.stt_provider.replace("_", " ")}
               </span>
             </div>
           </div>

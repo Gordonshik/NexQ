@@ -76,6 +76,15 @@ Select the device that your conferencing app (Zoom, Teams, etc.) uses for audio 
 
 You can verify by playing audio through your meeting app and checking that the "Them" level meter in NexQ responds.
 
+## Local GigaAM
+
+GigaAM runs an existing local `v3_e2e_rnnt` ONNX export without an API key or Python process. Choose its folder in **Settings > STT Providers**, then select GigaAM for **You**, **Them**, or both in **Settings > Audio & Devices**.
+
+- Both parties share one loaded model. Their audio is recognized in sequence, so the second channel may wait while the first is being processed.
+- GigaAM transcribes Russian only. Selecting it sets that party to Russian; Auto-detect and other languages are not available.
+- Results are final-only. A segment is submitted after a 0.8-second pause once the segment is at least one second long, after 0.8 seconds without new audio, or at 20 seconds. Silence does not produce text.
+- Stop the meeting before switching away from GigaAM so buffered audio can be transcribed and the shared model can unload.
+
 ## Transcription on macOS
 
 Audio capture and speech recognition are separate. Choose a provider for **each** party:

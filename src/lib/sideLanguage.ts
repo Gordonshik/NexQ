@@ -23,6 +23,12 @@ export function updatePartyConfig(
 ): MeetingAudioConfig {
   const merged = { ...config[party], ...updates };
   if (!merged.language) delete merged.language;
+  if ("local_model_id" in updates && updates.local_model_id === undefined) {
+    delete merged.local_model_id;
+  }
+  if ("local_model_path" in updates && updates.local_model_path === undefined) {
+    delete merged.local_model_path;
+  }
   return { ...config, [party]: merged, preset_name: null };
 }
 

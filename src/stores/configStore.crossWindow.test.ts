@@ -185,6 +185,25 @@ describe("configStore: Deepgram and local model picks across windows", () => {
     launcher.getState().setActiveModelForEngine("parakeet_tdt", "parakeet-v3");
     await vi.waitFor(() => expect(overlay.getState().activeModelPerEngine.parakeet_tdt).toBe("parakeet-v3"));
   });
+
+  it("a shared GigaAM folder reaches the other window and the next start", async () => {
+    const launcher = await openWindow();
+    const overlay = await openWindow();
+    launcher.getState().setMeetingAudioConfig({
+      you: { role: "You", device_id: "Mic", is_input_device: true, stt_provider: "gigaam", language: "ru-RU" },
+      them: { role: "Them", device_id: "Speakers", is_input_device: false, stt_provider: "gigaam", language: "ru-RU" },
+      recording_enabled: false,
+      preset_name: null,
+    });
+    launcher.getState().setGigaamModelPath("C:\\GigaPisar\\model");
+    await vi.waitFor(() => expect(overlay.getState().gigaamModelPath).toBe("C:\\GigaPisar\\model"));
+    expect(overlay.getState().meetingAudioConfig?.you.local_model_path).toBe("C:\\GigaPisar\\model");
+    expect(overlay.getState().meetingAudioConfig?.them.local_model_path).toBe("C:\\GigaPisar\\model");
+
+    const nextStart = await openWindow();
+    expect(nextStart.getState().gigaamModelPath).toBe("C:\\GigaPisar\\model");
+    expect(nextStart.getState().meetingAudioConfig?.you.local_model_path).toBe("C:\\GigaPisar\\model");
+  });
 });
 
 describe("configStore: stealth mode and the custom endpoint across windows", () => {

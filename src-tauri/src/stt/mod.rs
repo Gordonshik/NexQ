@@ -1,6 +1,7 @@
 pub mod deepgram;
 pub mod deepgram_flux;
 pub mod fbank;
+pub mod gigaam;
 pub mod local_engines;
 pub mod provider;
 pub mod whisper_cpp;
@@ -254,7 +255,10 @@ impl STTRouter {
                 p.set_language(&self.language);
                 Box::new(p)
             }
-            STTProviderType::SherpaOnnx | STTProviderType::OrtStreaming | STTProviderType::ParakeetTdt => {
+            STTProviderType::SherpaOnnx
+            | STTProviderType::OrtStreaming
+            | STTProviderType::ParakeetTdt
+            | STTProviderType::GigaAM => {
                 // These are created per-party in start_capture_per_party, not via STTRouter.
                 self.active_provider = None;
                 log::info!("STTRouter: {:?} selected (provider created per-party)", provider_type);
@@ -605,7 +609,10 @@ impl STTRouter {
                     .await
                     .map_err(|e| format!("Connection test failed: {}", e))
             }
-            STTProviderType::SherpaOnnx | STTProviderType::OrtStreaming | STTProviderType::ParakeetTdt => {
+            STTProviderType::SherpaOnnx
+            | STTProviderType::OrtStreaming
+            | STTProviderType::ParakeetTdt
+            | STTProviderType::GigaAM => {
                 // Local engines — always "available" if a model is downloaded.
                 // Model availability is checked at capture time in create_stt_provider_for_party.
                 Ok(true)
