@@ -53,6 +53,7 @@ const LOGGED_IN: ClaudeCliStatus = {
   version: "2.1.288",
   auth: { logged_in: true, auth_method: "claude.ai", subscription_type: "max", email: "me@example.com", login: "subscription" },
   npm_only: false,
+  required_version: null,
 };
 
 /** The footer's LLM chip: Claude's status chip, or the generic provider chip. */
@@ -126,6 +127,11 @@ describe("Settings ↔ footer sync of the active LLM", () => {
         customLlmBaseUrl: OLLAMA_CLOUD.base_url,
         customLlmAuthType: "bearer",
       });
+    });
+
+    it("says screenshot analysis needs a vision-capable custom model", async () => {
+      render(<LLMSettings />);
+      expect(await screen.findByText(/screenshots and pasted images need a vision-capable model/i)).toBeInTheDocument();
     });
 
     // Reported: a new token was saved but the custom endpoint in use kept

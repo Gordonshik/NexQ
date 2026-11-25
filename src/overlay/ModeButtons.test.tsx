@@ -175,6 +175,83 @@ describe("ModeButtons Ask box with a pasted image", () => {
     );
   });
 
+  it("sends an attached screenshot with a custom provider", async () => {
+    useConfigStore.setState({ llmProvider: "custom" });
+    render(<ModeButtons />);
+    openAsk();
+    await pasteImage("custom-shot");
+    fireEvent.click(button(/^Send question/));
+    await waitFor(() =>
+      expect(runUserAction).toHaveBeenCalledWith("AskQuestion", DEFAULT_IMAGE_QUESTION, {
+        images: [{ media_type: "image/png", data: btoa("custom-shot") }],
+      }),
+    );
+  });
+
+  it("doesn't send until a pasted image has finished preparing", async () => {
+    let release!: (bitmap: ImageBitmap) => void;
+    const pending = new Promise<ImageBitmap>((resolve) => (release = resolve));
+    vi.stubGlobal("createImageBitmap", vi.fn(() => pending));
+    render(<ModeButtons />);
+    openAsk();
+    fireEvent.change(input(), { target: { value: "what is this?" } });
+    const file = new File(["shot"], "screen.png", { type: "image/png" });
+    fireEvent.paste(input(), {
+      clipboardData: {
+        items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+        getData: () => "",
+      },
+    });
+
+    expect(button(/^Send question/).disabled).toBe(true);
+    fireEvent.keyDown(input(), { key: "Enter" });
+    expect(runUserAction).not.toHaveBeenCalled();
+
+    await act(async () => release({ width: 100, height: 100, close: () => {} }));
+    expect(await screen.findByRole("group", { name: "Attached images" })).toBeTruthy();
+    expect(button(/^Send question/).disabled).toBe(false);
+    fireEvent.click(button(/^Send question/));
+    await waitFor(() =>
+      expect(runUserAction).toHaveBeenCalledWith("AskQuestion", "what is this?", {
+        images: [{ media_type: "image/png", data: btoa("shot") }],
+      }),
+    );
+  });
+
+  it("drops an image that finishes preparing after the meeting changes", async () => {
+    let release!: (bitmap: ImageBitmap) => void;
+    const pending = new Promise<ImageBitmap>((resolve) => (release = resolve));
+    let first = true;
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => {
+      if (first) {
+        first = false;
+        return pending;
+      }
+      return { width: 100, height: 100, close: () => {} };
+    }));
+    useMeetingStore.setState({ activeMeeting: { id: "m1" } as never });
+    render(<ModeButtons />);
+    openAsk();
+    const file = new File(["old"], "screen.png", { type: "image/png" });
+    fireEvent.paste(input(), {
+      clipboardData: {
+        items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+        getData: () => "",
+      },
+    });
+    act(() => useMeetingStore.setState({ activeMeeting: { id: "m2" } as never }));
+
+    await act(async () => {
+      release({ width: 100, height: 100, close: () => {} });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    openAsk();
+    expect(chips()).toBeNull();
+    for (const name of ["a", "b", "c"]) await pasteImage(name);
+    await waitFor(() => expect(chips()!.querySelectorAll("img")).toHaveLength(3));
+    act(() => useMeetingStore.setState({ activeMeeting: null }));
+  });
+
   it("clears the text and the image once the answer came", async () => {
     render(<ModeButtons />);
     openAsk();

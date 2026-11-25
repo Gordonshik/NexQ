@@ -6,6 +6,7 @@ use crate::intelligence::action_config::{AllActionConfigs, InstructionPresets};
 use crate::intelligence::context_scope::{self, ResolvedScope, TranscriptWindow};
 use crate::intelligence::IntelligenceEngine;
 use crate::llm::cli_agent::context::Seg;
+use crate::llm::cli_agent::detect::{format_version, MIN_CLAUDE_VERSION};
 use crate::llm::cli_agent::manager::{OnDelta, SessionKey, SessionScope};
 use crate::llm::cli_agent::session::{decode_activity, decode_tool_result, AgentError};
 use crate::sources::activity::{describe_tool_use, notice, SourceActivity};
@@ -374,7 +375,7 @@ pub(crate) fn is_sources_start_failure(err: &AgentError) -> bool {
         AgentError::Spawn(_) | AgentError::NoUsableSources { .. } | AgentError::Timeout | AgentError::Crashed(_)
     ) && !matches!(
         err.kind(),
-        AgentErrorKind::NotInstalled | AgentErrorKind::NotLoggedIn | AgentErrorKind::RateLimited
+        AgentErrorKind::NotInstalled | AgentErrorKind::Outdated | AgentErrorKind::NotLoggedIn | AgentErrorKind::RateLimited
     )
 }
 
@@ -388,11 +389,17 @@ pub(crate) fn stateless_reads_images(active: Option<&ProviderType>) -> bool {
 /// Why a request with images can't be answered: the provider that would answer
 /// can't take images, or it is Claude but its session isn't available for this
 /// request (outage, fallback, meeting too long).
-pub(crate) fn images_refusal(active: Option<&ProviderType>) -> &'static str {
+pub(crate) fn images_refusal(active: Option<&ProviderType>, health: ClaudeHealth) -> String {
     if active == Some(&ProviderType::ClaudeCli) {
-        "Claude can't read images right now. Try again in a moment, or remove the image and ask again."
+        if health == ClaudeHealth::Unavailable(AgentErrorKind::Outdated) {
+            return format!(
+                "Claude Code is too old for NexQ. Update it to {} or newer, choose a vision-capable fallback in Settings > LLM Providers, or remove the image and ask again.",
+                format_version(MIN_CLAUDE_VERSION)
+            );
+        }
+        "Claude can't read images right now. Try again in a moment, or remove the image and ask again.".to_string()
     } else {
-        "Images work only with Claude (subscription) or a local model (Ollama, LM Studio or a custom endpoint). Choose one in Settings > LLM, or remove the image and ask again."
+        "Images work only with Claude (subscription) or a vision-capable model (Ollama, LM Studio or a Custom endpoint). Choose one in Settings > LLM, or remove the image and ask again.".to_string()
     }
 }
 
@@ -1177,7 +1184,7 @@ pub async fn generate_assist(
     // only through its session, which the route above already handled):
     // answering without it would silently ignore what the user attached.
     if !images.is_empty() && !stateless_reads_images(provider_type.as_ref()) {
-        let message = images_refusal(provider_type.as_ref()).to_string();
+        let message = images_refusal(provider_type.as_ref(), state.claude_health.get());
         // End the stream too: a session attempt above may already have started
         // it, and the frontend ignores errors for streams it never started, so
         // this is harmless otherwise (the rejection below reports it then).
@@ -1533,14 +1540,24 @@ mod tests {
 
     #[test]
     fn images_refusal_names_the_provider_problem() {
-        assert!(images_refusal(Some(&ProviderType::Openai)).starts_with("Images work only with Claude"));
-        assert!(images_refusal(None).starts_with("Images work only with Claude"));
-        assert!(images_refusal(Some(&ProviderType::ClaudeCli)).starts_with("Claude can't read images right now"));
-        // Antigravity and Codex sessions never take images: the Claude-or-local message.
+        assert!(images_refusal(Some(&ProviderType::Openai), ClaudeHealth::Healthy).starts_with("Images work only with Claude"));
+        assert!(images_refusal(None, ClaudeHealth::Healthy).starts_with("Images work only with Claude"));
+        assert!(images_refusal(Some(&ProviderType::ClaudeCli), ClaudeHealth::Healthy).starts_with("Claude can't read images right now"));
+        // Antigravity and Codex sessions never take images: the Claude-or-vision message.
         for other in [ProviderType::AntigravityCli, ProviderType::CodexCli] {
-            assert!(images_refusal(Some(&other)).starts_with("Images work only with Claude"));
+            assert!(images_refusal(Some(&other), ClaudeHealth::Healthy).starts_with("Images work only with Claude"));
         }
-        assert!(images_refusal(Some(&ProviderType::Ollama)).contains("local model"));
+        assert!(images_refusal(Some(&ProviderType::Ollama), ClaudeHealth::Healthy).contains("vision-capable model"));
+        assert!(images_refusal(Some(&ProviderType::Openai), ClaudeHealth::Healthy).contains("Custom endpoint"));
+    }
+
+    #[test]
+    fn an_outdated_claude_image_refusal_says_to_update_or_choose_a_vision_fallback() {
+        let message = images_refusal(Some(&ProviderType::ClaudeCli), ClaudeHealth::Unavailable(AgentErrorKind::Outdated));
+        assert!(message.contains("Claude Code is too old"), "{message}");
+        assert!(message.contains("2.1.259 or newer"), "{message}");
+        assert!(message.contains("vision-capable fallback"), "{message}");
+        assert!(!message.contains("Try again in a moment"), "{message}");
     }
 
     #[test]
@@ -1679,6 +1696,10 @@ mod tests {
         assert!(!is_sources_start_failure(&AgentError::Cli(AgentErrorKind::RateLimited, "limit".into())));
         assert!(!is_sources_start_failure(&AgentError::Spawn("Claude CLI not installed: claude.exe not found".into())));
         assert!(!is_sources_start_failure(&AgentError::Crashed("Not logged in. Please run /login".into())));
+        // A Claude that is too old is an outage of Claude, not of the sources.
+        assert!(!is_sources_start_failure(&AgentError::Spawn(
+            "Claude Code 2.1.206 is too old for NexQ. Update it to 2.1.259 or newer.".into()
+        )));
         assert!(!is_sources_start_failure(&AgentError::Cancelled));
     }
 

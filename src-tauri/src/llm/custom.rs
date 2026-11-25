@@ -146,16 +146,19 @@ impl CustomClient {
     /// key or an unknown model, while `/api/chat` only says it doesn't exist.
     async fn open_chat_stream(
         &self,
-        msgs: &[serde_json::Value],
-        native_msgs: &[serde_json::Value],
+        messages: &[LLMMessage],
         model: &str,
         params: &GenerationParams,
     ) -> Result<reqwest::Response, LLMError> {
+        // The two endpoints want images differently: OpenAI-compatible servers
+        // take them as content parts, Ollama's native API as an `images` array.
+        let msgs: Vec<serde_json::Value> = messages.iter().map(openai_message_json).collect();
+        let native_msgs: Vec<serde_json::Value> = messages.iter().map(ollama_message_json).collect();
         let setting = thinking::resolve(params, self.options.thinking);
         let extra = self.options.extra_request();
         let first = match self
-            .attempt("/chat/completions", "custom", model, params, setting, |with_thinking| {
-                chat_completions_body(msgs, model, params, setting, extra.as_ref(), with_thinking)
+            .attempt(&self.endpoint_url("/chat/completions"), "custom", model, params, setting, |with_thinking| {
+                chat_completions_body(&msgs, model, params, setting, extra.as_ref(), with_thinking)
             })
             .await?
         {
@@ -165,8 +168,8 @@ impl CustomClient {
         log::warn!("CustomLLM: /chat/completions failed; trying /api/chat");
 
         let (second, unreachable) = match self
-            .attempt("/api/chat", "custom:/api/chat", model, params, setting, |with_thinking| {
-                native_chat_body(native_msgs, model, setting, extra.as_ref(), with_thinking)
+            .attempt(&self.native_url("/api/chat"), "custom:/api/chat", model, params, setting, |with_thinking| {
+                native_chat_body(&native_msgs, model, setting, extra.as_ref(), with_thinking)
             })
             .await?
         {
@@ -184,7 +187,7 @@ impl CustomClient {
     /// server (`label` + base URL) and model.
     async fn attempt(
         &self,
-        path: &str,
+        url: &str,
         label: &str,
         model: &str,
         params: &GenerationParams,
@@ -195,13 +198,13 @@ impl CustomClient {
         let mut with_thinking = thinking::should_send(label, endpoint, model, setting);
         loop {
             let (body, sent) = build(with_thinking);
-            match self.post_json(path, &body, params).await? {
+            match self.post_json(url, &body, params).await? {
                 Ok(resp) if resp.status().is_success() => return Ok(Attempt::Stream(resp)),
                 Ok(resp) => {
                     let status = resp.status();
                     let text = cancellable(params, resp.text()).await?.unwrap_or_default();
                     if sent && thinking::rejects_thinking_param(status.as_u16(), &text) {
-                        log::warn!("CustomLLM: {}{} rejected the thinking parameter; retrying without it", model, path);
+                        log::warn!("CustomLLM: {} request to {} rejected the thinking parameter; retrying without it", model, label);
                         thinking::remember_unsupported(label, endpoint, model);
                         with_thinking = false;
                         continue;
@@ -213,24 +216,28 @@ impl CustomClient {
         }
     }
 
-    /// POST `body` as JSON to `path` under the base URL, with the configured auth.
+    /// POST `body` as JSON to the full endpoint URL, with the configured auth.
     async fn post_json(
         &self,
-        path: &str,
+        url: &str,
         body: &serde_json::Value,
         params: &GenerationParams,
     ) -> Result<Result<reqwest::Response, reqwest::Error>, LLMError> {
         let request = self
-            .apply_auth(self.client.post(format!("{}{}", self.config.base_url, path)))
+            .apply_auth(self.client.post(url))
             .header("Content-Type", "application/json")
             .json(body);
         cancellable(params, request.send()).await
     }
 
-    /// "answered 401 Unauthorized (reason)" for a failed response.
-    async fn failure(resp: reqwest::Response) -> String {
-        let status = resp.status();
-        Self::failure_text(status, &resp.text().await.unwrap_or_default())
+    fn endpoint_url(&self, path: &str) -> String {
+        format!("{}{}", self.config.base_url.trim_end_matches('/'), path)
+    }
+
+    fn native_url(&self, path: &str) -> String {
+        let base = self.config.base_url.trim_end_matches('/');
+        let root = base.strip_suffix("/v1").unwrap_or(base);
+        format!("{}{}", root, path)
     }
 
     fn failure_text(status: reqwest::StatusCode, body: &str) -> String {
@@ -352,7 +359,7 @@ impl LLMProvider for CustomClient {
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LLMError> {
         // Try OpenAI-compatible /models endpoint
-        let url = format!("{}/models", self.config.base_url);
+        let url = self.endpoint_url("/models");
         let request = self.apply_auth(self.client.get(&url));
 
         match request.send().await {
@@ -383,7 +390,7 @@ impl LLMProvider for CustomClient {
             }
             _ => {
                 // Try Ollama-compatible /api/tags endpoint
-                let url = format!("{}/api/tags", self.config.base_url);
+                let url = self.native_url("/api/tags");
                 let request = self.apply_auth(self.client.get(&url));
 
                 match request.send().await {
@@ -423,9 +430,12 @@ impl LLMProvider for CustomClient {
 
         // Try /models first (OpenAI-compat), then /api/tags (Ollama-compat),
         // then a plain GET to the base URL.
-        for path in ["/models", "/api/tags", ""] {
-            let url = format!("{}{}", self.config.base_url, path);
-            if let Ok(resp) = self.apply_auth(self.client.get(&url)).send().await {
+        for (path, url) in [
+            ("/models", self.endpoint_url("/models")),
+            ("/api/tags", self.native_url("/api/tags")),
+            ("", self.config.base_url.clone()),
+        ] {
+            if let Ok(resp) = self.apply_auth(self.client.get(url)).send().await {
                 // The plain base URL is often a public page: its 200 doesn't
                 // count once an API path refused the key.
                 if resp.status().is_success() && (!path.is_empty() || refused.is_none()) {
@@ -455,15 +465,10 @@ impl LLMProvider for CustomClient {
 
         thinking::apply_prompt_hint(&mut messages, model, thinking::resolve(&params, self.options.thinking));
 
-        // The two endpoints want images differently: OpenAI-compatible servers
-        // take them as content parts, Ollama's native API as an `images` array.
-        let msgs: Vec<serde_json::Value> = messages.iter().map(openai_message_json).collect();
-        let native_msgs: Vec<serde_json::Value> = messages.iter().map(ollama_message_json).collect();
-
         // NOTE: llm_stream_start is emitted by IntelligenceEngine::generate_assist()
         // with the correct mode. Do NOT emit it here — it would overwrite the mode.
 
-        let response = match self.open_chat_stream(&msgs, &native_msgs, model, &params).await {
+        let response = match self.open_chat_stream(&messages, model, &params).await {
             Ok(response) => response,
             Err(LLMError::Cancelled) => return Err(LLMError::Cancelled),
             Err(e) => {
@@ -543,8 +548,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    /// The requests a test server saw: path and Authorization header.
-    type Seen = Arc<Mutex<Vec<(String, Option<String>)>>>;
+    /// The requests a test server saw: path, Authorization header and JSON body.
+    type Seen = Arc<Mutex<Vec<(String, Option<String>, serde_json::Value)>>>;
 
     /// A local HTTP server answering each path with a fixed status and body
     /// (404 for any other path). Returns its base URL, ending in /v1.
@@ -584,7 +589,12 @@ mod tests {
                     raw.extend_from_slice(&buf[..n]);
                 }
                 let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
-                log.lock().unwrap().push((path.clone(), header("authorization")));
+                let request_body = if length == 0 {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::from_slice(&raw[head_end..head_end + length]).unwrap_or(serde_json::Value::Null)
+                };
+                log.lock().unwrap().push((path.clone(), header("authorization"), request_body));
                 let (status, body) = routes
                     .iter()
                     .find(|(p, _, _)| *p == path)
@@ -616,25 +626,44 @@ mod tests {
         vec![json!({ "role": "user", "content": "hi" })]
     }
 
+    fn text_chat_messages() -> Vec<LLMMessage> {
+        vec![LLMMessage {
+            role: "user".to_string(),
+            content: "hi".to_string(),
+            images: vec![],
+        }]
+    }
+
+    fn image_chat_messages() -> Vec<LLMMessage> {
+        vec![LLMMessage {
+            role: "user".to_string(),
+            content: "What is this?".to_string(),
+            images: vec![crate::llm::cli_agent::protocol::ImageAttachment {
+                media_type: "image/png".to_string(),
+                data: "AAAA".to_string(),
+            }],
+        }]
+    }
+
     async fn failure_message(client: &CustomClient, model: &str) -> String {
-        match client.open_chat_stream(&hi(), &hi(), model, &GenerationParams::default()).await {
+        match client.open_chat_stream(&text_chat_messages(), model, &GenerationParams::default()).await {
             Err(LLMError::ProviderError(message)) => message,
             other => panic!("expected a provider error, got {:?}", other.map(|r| r.status())),
         }
     }
 
     /// Reported bug: Ollama Cloud refusing the request showed only the
-    /// fallback's answer, "path /v1/api/chat not found".
+    /// fallback's answer, "path /api/chat not found".
     #[tokio::test]
     async fn when_both_endpoints_fail_the_first_answer_comes_first() {
         let (base, _) = server(vec![
             ("/v1/chat/completions", 401, r#"{"error":"unauthorized"}"#),
-            ("/v1/api/chat", 404, r#"{"error":"path \"/v1/api/chat\" not found"}"#),
+            ("/api/chat", 404, r#"{"error":"path \"/api/chat\" not found"}"#),
         ])
         .await;
         assert_eq!(
             failure_message(&client(&base, CustomAuthType::None, None), "gemma4:31b").await,
-            r#"Custom endpoint request failed: /chat/completions answered 401 Unauthorized (unauthorized); /api/chat answered 404 Not Found (path "/v1/api/chat" not found)"#
+            r#"Custom endpoint request failed: /chat/completions answered 401 Unauthorized (unauthorized); /api/chat answered 404 Not Found (path "/api/chat" not found)"#
         );
     }
 
@@ -652,14 +681,80 @@ mod tests {
 
     #[tokio::test]
     async fn an_ollama_native_server_still_answers_on_api_chat() {
-        let (base, seen) = server(vec![("/v1/api/chat", 200, "{}")]).await;
+        let (base, seen) = server(vec![("/api/chat", 200, "{}")]).await;
         let response = client(&base, CustomAuthType::None, None)
-            .open_chat_stream(&hi(), &hi(), "llama3.2", &GenerationParams::default())
+            .open_chat_stream(&text_chat_messages(), "llama3.2", &GenerationParams::default())
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
-        let paths: Vec<String> = seen.lock().unwrap().iter().map(|(p, _)| p.clone()).collect();
-        assert_eq!(paths, ["/v1/chat/completions", "/v1/api/chat"]);
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|(p, _, _)| p.clone()).collect();
+        assert_eq!(paths, ["/v1/chat/completions", "/api/chat"]);
+    }
+
+    #[tokio::test]
+    async fn a_root_base_url_with_a_trailing_slash_still_uses_api_chat() {
+        let (base, seen) = server(vec![("/chat/completions", 404, "{}"), ("/api/chat", 200, "{}")]).await;
+        let root = format!("{}/", base.trim_end_matches("/v1"));
+        let response = client(&root, CustomAuthType::None, None)
+            .open_chat_stream(&text_chat_messages(), "llama3.2", &GenerationParams::default())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|(p, _, _)| p.clone()).collect();
+        assert_eq!(paths, ["/chat/completions", "/api/chat"]);
+    }
+
+    #[tokio::test]
+    async fn custom_openai_request_carries_a_screenshot_as_an_image_url() {
+        let (base, seen) = server(vec![("/v1/chat/completions", 200, "{}")]).await;
+        let response = client(&base, CustomAuthType::None, None)
+            .open_chat_stream(&image_chat_messages(), "vision-model", &GenerationParams::default())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "/v1/chat/completions");
+        assert_eq!(
+            seen[0].2["messages"][0]["content"],
+            json!([
+                { "type": "text", "text": "What is this?" },
+                { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } },
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_native_fallback_carries_a_screenshot_as_raw_base64() {
+        let (base, seen) = server(vec![("/api/chat", 200, "{}")]).await;
+        let response = client(&base, CustomAuthType::None, None)
+            .open_chat_stream(&image_chat_messages(), "vision-model", &GenerationParams::default())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[1].0, "/api/chat");
+        assert_eq!(
+            seen[1].2["messages"][0],
+            json!({ "role": "user", "content": "What is this?", "images": ["AAAA"] })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_v1_base_url_lists_models_from_the_native_server_root() {
+        let (base, seen) = server(vec![
+            ("/v1/models", 404, "{}"),
+            ("/api/tags", 200, r#"{"models":[{"name":"vision-model"}]}"#),
+        ])
+        .await;
+        let models = client(&base, CustomAuthType::None, None).list_models().await.unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "vision-model");
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|(p, _, _)| p.clone()).collect();
+        assert_eq!(paths, ["/v1/models", "/api/tags"]);
     }
 
     #[test]
@@ -703,7 +798,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_working_ollama_path_still_passes_after_a_refusal() {
-        let (base, _) = server(vec![("/v1/models", 401, "{}"), ("/v1/api/tags", 200, r#"{"models":[]}"#)]).await;
+        let (base, _) = server(vec![("/v1/models", 401, "{}"), ("/api/tags", 200, r#"{"models":[]}"#)]).await;
         assert!(client(&base, CustomAuthType::None, None).test_connection().await.unwrap());
     }
 
@@ -718,10 +813,12 @@ mod tests {
     async fn a_bearer_token_is_sent_without_spaces_around_it() {
         let (base, seen) = server(vec![("/v1/chat/completions", 200, "{}")]).await;
         client(&base, CustomAuthType::Bearer, Some("  tok "))
-            .open_chat_stream(&hi(), &hi(), "m", &GenerationParams::default())
+            .open_chat_stream(&text_chat_messages(), "m", &GenerationParams::default())
             .await
             .unwrap();
-        assert_eq!(seen.lock().unwrap()[0], ("/v1/chat/completions".to_string(), Some("Bearer tok".to_string())));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0, "/v1/chat/completions");
+        assert_eq!(seen[0].1.as_deref(), Some("Bearer tok"));
     }
 
     /// A token cleared in Settings applies at once, as it does after a restart:
@@ -730,10 +827,12 @@ mod tests {
     async fn a_blank_credential_sends_no_auth_header() {
         let (base, seen) = server(vec![("/v1/chat/completions", 200, "{}")]).await;
         client(&base, CustomAuthType::Bearer, Some("   "))
-            .open_chat_stream(&hi(), &hi(), "m", &GenerationParams::default())
+            .open_chat_stream(&text_chat_messages(), "m", &GenerationParams::default())
             .await
             .unwrap();
-        assert_eq!(seen.lock().unwrap()[0], ("/v1/chat/completions".to_string(), None));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0, "/v1/chat/completions");
+        assert_eq!(seen[0].1, None);
     }
 
     /// The first failure's body is read now, so a server that stalls while
@@ -772,14 +871,14 @@ mod tests {
         )])
         .await;
         let c = thinking_client(&base, ThinkingSetting::Off);
-        let count = || seen.lock().unwrap().iter().filter(|(p, _)| p == "/v1/chat/completions").count();
+        let count = || seen.lock().unwrap().iter().filter(|(p, _, _)| p == "/v1/chat/completions").count();
 
-        let _ = c.open_chat_stream(&hi(), &hi(), "retry-custom-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&text_chat_messages(), "retry-custom-model", &GenerationParams::default()).await;
         assert_eq!(count(), 2, "one try with the parameter, one without");
         assert!(thinking::is_known_unsupported("custom", &base, "retry-custom-model"));
 
         // The next request does not try the parameter again.
-        let _ = c.open_chat_stream(&hi(), &hi(), "retry-custom-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&text_chat_messages(), "retry-custom-model", &GenerationParams::default()).await;
         assert_eq!(count(), 3);
     }
 
@@ -807,23 +906,23 @@ mod tests {
     }
 
     /// A server whose /v1/chat/completions is missing (404) but whose native
-    /// /v1/api/chat refuses `think` with a 400: the fallback retries without it.
+    /// /api/chat refuses `think` with a 400: the fallback retries without it.
     #[tokio::test]
     async fn the_api_chat_fallback_retries_without_a_refused_think_parameter() {
         let (base, seen) = server(vec![(
-            "/v1/api/chat",
+            "/api/chat",
             400,
             r#"{"error":"\"m\" does not support thinking"}"#,
         )])
         .await;
         let c = thinking_client(&base, ThinkingSetting::Off);
-        let count = || seen.lock().unwrap().iter().filter(|(p, _)| p == "/v1/api/chat").count();
-        let _ = c.open_chat_stream(&hi(), &hi(), "native-retry-model", &GenerationParams::default()).await;
+        let count = || seen.lock().unwrap().iter().filter(|(p, _, _)| p == "/api/chat").count();
+        let _ = c.open_chat_stream(&text_chat_messages(), "native-retry-model", &GenerationParams::default()).await;
         assert_eq!(count(), 2, "one try with think, one without");
         assert!(thinking::is_known_unsupported("custom:/api/chat", &base, "native-retry-model"));
         // The other endpoint's memory is separate: /chat/completions never rejected anything.
         assert!(!thinking::is_known_unsupported("custom", &base, "native-retry-model"));
-        let _ = c.open_chat_stream(&hi(), &hi(), "native-retry-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&text_chat_messages(), "native-retry-model", &GenerationParams::default()).await;
         assert_eq!(count(), 3, "remembered: no more retry");
     }
 
@@ -832,12 +931,12 @@ mod tests {
         let (old_base, _) =
             server(vec![("/v1/chat/completions", 400, r#"{"error":"unknown field reasoning_effort"}"#)]).await;
         let c = thinking_client(&old_base, ThinkingSetting::Off);
-        let _ = c.open_chat_stream(&hi(), &hi(), "shared-model", &GenerationParams::default()).await;
+        let _ = c.open_chat_stream(&text_chat_messages(), "shared-model", &GenerationParams::default()).await;
         assert!(thinking::is_known_unsupported("custom", &old_base, "shared-model"));
 
         let (new_base, seen) = server(vec![("/v1/chat/completions", 200, "data: [DONE]\n\n")]).await;
         let c = thinking_client(&new_base, ThinkingSetting::Off);
-        c.open_chat_stream(&hi(), &hi(), "shared-model", &GenerationParams::default()).await.unwrap();
+        c.open_chat_stream(&text_chat_messages(), "shared-model", &GenerationParams::default()).await.unwrap();
         assert_eq!(seen.lock().unwrap().len(), 1);
         assert!(!thinking::is_known_unsupported("custom", &new_base, "shared-model"));
         assert!(thinking::should_send("custom", &new_base, "shared-model", ThinkingSetting::Off));
@@ -847,8 +946,8 @@ mod tests {
     async fn auto_never_retries() {
         let (base, seen) = server(vec![("/v1/chat/completions", 400, r#"{"error":"reasoning_effort bad"}"#)]).await;
         let c = thinking_client(&base, ThinkingSetting::Auto);
-        let _ = c.open_chat_stream(&hi(), &hi(), "auto-custom-model", &GenerationParams::default()).await;
-        let n = seen.lock().unwrap().iter().filter(|(p, _)| p == "/v1/chat/completions").count();
+        let _ = c.open_chat_stream(&text_chat_messages(), "auto-custom-model", &GenerationParams::default()).await;
+        let n = seen.lock().unwrap().iter().filter(|(p, _, _)| p == "/v1/chat/completions").count();
         assert_eq!(n, 1);
     }
 
@@ -873,7 +972,7 @@ mod tests {
         let custom = client(&base, CustomAuthType::None, None);
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            custom.open_chat_stream(&hi(), &hi(), "m", &params),
+            custom.open_chat_stream(&text_chat_messages(), "m", &params),
         )
         .await;
         assert!(matches!(outcome, Ok(Err(LLMError::Cancelled))), "{:?}", outcome.map(|r| r.map(|resp| resp.status())));
@@ -913,7 +1012,7 @@ mod tests {
         ];
         let mut ok = Vec::new();
         for (label, client, model) in cases {
-            match client.open_chat_stream(&hi(), &hi(), model, &params).await {
+            match client.open_chat_stream(&text_chat_messages(), model, &params).await {
                 Ok(response) => {
                     println!("{label}: OK {}", response.status());
                     ok.push(label);

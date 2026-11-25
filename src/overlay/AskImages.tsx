@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { ImageAttachment } from "../lib/types";
 import {
@@ -15,7 +15,7 @@ import { useConfigStore } from "../stores/configStore";
 
 /** Why a pasted image is refused when the provider can't read images. */
 export const IMAGES_NEED_VISION =
-  "Images work only with Claude (subscription) or a local model (Ollama, LM Studio or a custom endpoint). Choose one in Settings > LLM.";
+  "Images work only with Claude (subscription) or a vision-capable model (Ollama, LM Studio or a Custom endpoint). Choose one in Settings > LLM.";
 
 /**
  * The Ask box placeholder. Short enough to show whole in the overlay's Ask box
@@ -28,7 +28,7 @@ export function askPlaceholder(canAttach: boolean): string {
 /**
  * Images pasted (Ctrl+V) into an Ask box. A paste that carries text, or no
  * image, is left alone, so plain text pastes as usual. Only a provider that
- * reads images (Claude's session, or a local/custom model) can take one: with
+ * reads images (Claude's session, or a vision-capable local/custom model) can take one: with
  * another one a pasted image is refused with a hint instead of being attached
  * and failing on send.
  */
@@ -36,11 +36,18 @@ export function useAskImages() {
   const [images, setImages] = useState<ImageAttachment[]>([]);
   // A request with these images is on its way: they aren't shown meanwhile.
   const [sending, setSending] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const canAttach = useConfigStore((s) => providerReadsImages(s.llmProvider));
   // Slots taken so far, including images still being prepared. A slot is reserved
   // before the (async) work starts, so a quick second paste sees it.
   const count = useRef(0);
+  const pending = useRef(0);
+  const generation = useRef(0);
+
+  useEffect(() => () => {
+    generation.current += 1;
+  }, []);
 
   /**
    * Attaches image files: from a paste, or the screen-capture shortcut. The
@@ -65,20 +72,32 @@ export function useAskImages() {
       accepted.push(file);
     }
     if (accepted.length === 0) return false;
+    const currentGeneration = generation.current;
+    pending.current += 1;
+    setPreparing(true);
+    setAnnouncement("Preparing image...");
     void (async () => {
-      const prepared = await Promise.allSettled(accepted.map(prepareImage));
-      const added: ImageAttachment[] = [];
-      for (const result of prepared) {
-        if (result.status === "fulfilled") {
-          added.push(result.value);
-        } else {
-          count.current -= 1;
-          showToast(result.reason instanceof Error ? result.reason.message : "Couldn't read the image", "error");
+      try {
+        const prepared = await Promise.allSettled(accepted.map(prepareImage));
+        if (currentGeneration !== generation.current) return;
+        const added: ImageAttachment[] = [];
+        for (const result of prepared) {
+          if (result.status === "fulfilled") {
+            added.push(result.value);
+          } else {
+            count.current -= 1;
+            showToast(result.reason instanceof Error ? result.reason.message : "Couldn't read the image", "error");
+          }
         }
-      }
-      if (added.length > 0) {
-        setImages((prev) => [...prev, ...added]);
-        setAnnouncement(`Image attached (${count.current} of ${MAX_IMAGES})`);
+        if (added.length > 0) {
+          setImages((prev) => [...prev, ...added]);
+          setAnnouncement(`Image attached (${count.current} of ${MAX_IMAGES})`);
+        }
+      } finally {
+        if (currentGeneration === generation.current) {
+          pending.current -= 1;
+          if (pending.current === 0) setPreparing(false);
+        }
       }
     })();
     return true;
@@ -115,12 +134,15 @@ export function useAskImages() {
   }, []);
 
   const clear = useCallback(() => {
+    generation.current += 1;
+    pending.current = 0;
     count.current = 0;
+    setPreparing(false);
     setImages([]);
     setAnnouncement("");
   }, []);
 
-  return { images, sending, setSending, canAttach, announcement, onPaste, attach, remove, removeSent, clear };
+  return { images, sending, setSending, preparing, canAttach, announcement, onPaste, attach, remove, removeSent, clear };
 }
 
 /**

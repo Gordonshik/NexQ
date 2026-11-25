@@ -37,6 +37,21 @@ describe("generateAssist", () => {
     ]);
   });
 
+  it("forwards attached images to the backend", async () => {
+    useTranscriptStore.setState({ segments: [] } as never);
+    const images = [{ media_type: "image/png", data: "AAAA" }];
+
+    await generateAssist("AskQuestion", "What is this?", { requestId: "shot-1", images });
+
+    expect(invoke).toHaveBeenCalledWith("generate_assist", {
+      mode: "AskQuestion",
+      customQuestion: "What is this?",
+      transcriptSegments: "[]",
+      requestId: "shot-1",
+      images,
+    });
+  });
+
   it("sends the source pills only when the caller has them (no pills = automatic = no sources)", async () => {
     useTranscriptStore.setState({ segments: [] } as never);
     await generateAssist("Assist");

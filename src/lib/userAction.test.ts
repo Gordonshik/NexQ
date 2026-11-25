@@ -66,6 +66,17 @@ describe("runUserAction", () => {
     expect((generateAssist.mock.calls[2][2] as { scope: unknown }).scope).toBeNull();
   });
 
+  it("keeps attached images on the Ask request", async () => {
+    const images = [{ media_type: "image/png", data: "AAAA" }];
+
+    await runUserAction("AskQuestion", "What is this?", { requestId: "shot-1", images });
+
+    expect(generateAssist).toHaveBeenCalledWith("AskQuestion", "What is this?", expect.objectContaining({
+      requestId: "shot-1",
+      images,
+    }));
+  });
+
   it("a second press while the first is still sending keeps the first's progress and scope", async () => {
     useConfigStore.setState({ contextScope: { kind: "minutes", minutes: 5 }, contextScopeSticky: false });
     useStreamStore.setState({ phase: "sending", pendingRequestId: "first", isStreaming: false });
