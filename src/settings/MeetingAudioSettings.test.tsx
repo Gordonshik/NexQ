@@ -114,7 +114,7 @@ it("offers GigaAM to both parties with one shared folder and Russian-only side l
     expect(Array.from(language.options, (option) => option.textContent)).toEqual(["Russian"]);
   }
   expect(useConfigStore.getState().sttLanguage).toBe("en-US");
-  expect(screen.getAllByText(folder)).toHaveLength(1);
+  expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue(folder);
 });
 
 it("does not revive stale model settings when GigaAM has no shared folder", async () => {
@@ -196,7 +196,7 @@ it("keeps saved GigaAM parties selected while their folder is not configured", (
 
   expect(screen.getByRole("button", { name: "You speech-to-text provider" })).toHaveTextContent("GigaAM v3 RNNT");
   expect(screen.getByRole("button", { name: "Them speech-to-text provider" })).toHaveTextContent("GigaAM v3 RNNT");
-  expect(screen.getByText("No folder selected")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue("");
   expect(useConfigStore.getState().meetingAudioConfig?.you.stt_provider).toBe("gigaam");
   expect(useConfigStore.getState().meetingAudioConfig?.them.stt_provider).toBe("gigaam");
 });
