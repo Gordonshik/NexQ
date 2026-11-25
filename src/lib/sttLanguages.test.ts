@@ -131,6 +131,14 @@ describe("sideLanguage", () => {
 
 describe("sideLanguageHint", () => {
   const none = {};
+  it("allows Russian only for GigaAM and leaves Auto-detect to its refusal", () => {
+    expect(sideLanguageHint({ provider: "gigaam" }, "ru-RU", none)).toBeNull();
+    expect(sideLanguageHint({ provider: "gigaam" }, "en-US", none)).toEqual({
+      tone: "warning",
+      text: "GigaAM transcribes Russian only. Choose Russian (ru-RU) for this side.",
+    });
+    expect(sideLanguageHint({ provider: "gigaam" }, "auto", none)).toBeNull();
+  });
   it("warns about Flux and Ukrainian, Cartesia languages, Parakeet CTC and Vietnamese", () => {
     expect(sideLanguageHint({ provider: "deepgram" }, "uk-UA", { deepgram: "flux-general-multi" })).toEqual({
       tone: "warning",

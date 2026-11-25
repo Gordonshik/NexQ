@@ -170,6 +170,8 @@ pub enum STTProviderType {
     /// NVIDIA Parakeet TDT — CTC/TDT architecture via ONNX Runtime.
     /// #1 on Open ASR Leaderboard (~6% WER), native streaming.
     ParakeetTdt,
+    /// GigaAM v3 e2e RNNT — shared offline ONNX engine, Russian only.
+    GigaAM,
     /// Cartesia ink-2 over WebSocket, with Cartesia's own turn detection.
     Cartesia,
 }
@@ -188,6 +190,7 @@ impl STTProviderType {
             STTProviderType::SherpaOnnx => "sherpa_onnx",
             STTProviderType::OrtStreaming => "ort_streaming",
             STTProviderType::ParakeetTdt => "parakeet_tdt",
+            STTProviderType::GigaAM => "gigaam",
             STTProviderType::Cartesia => "cartesia",
         }
     }
@@ -205,6 +208,7 @@ impl STTProviderType {
             "sherpa_onnx" => Some(STTProviderType::SherpaOnnx),
             "ort_streaming" => Some(STTProviderType::OrtStreaming),
             "parakeet_tdt" => Some(STTProviderType::ParakeetTdt),
+            "gigaam" => Some(STTProviderType::GigaAM),
             "cartesia" => Some(STTProviderType::Cartesia),
             _ => None,
         }
@@ -482,6 +486,13 @@ pub fn list_available_providers() -> Vec<STTProviderInfo> {
             ],
         },
         STTProviderInfo {
+            provider_type: "gigaam".to_string(),
+            name: "GigaAM v3 RNNT (Local)".to_string(),
+            requires_api_key: false,
+            is_local: true,
+            supported_languages: vec!["ru-RU".to_string()],
+        },
+        STTProviderInfo {
             provider_type: "parakeet_tdt".to_string(),
             name: "Parakeet TDT (Best Local)".to_string(),
             requires_api_key: false,
@@ -520,6 +531,20 @@ pub fn list_available_providers() -> Vec<STTProviderInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gigaam_is_a_russian_only_local_provider() {
+        let provider = STTProviderType::from_str("gigaam").unwrap();
+        assert_eq!(provider, STTProviderType::GigaAM);
+        assert_eq!(provider.as_str(), "gigaam");
+        let info = list_available_providers()
+            .into_iter()
+            .find(|info| info.provider_type == "gigaam")
+            .unwrap();
+        assert!(info.is_local);
+        assert!(!info.requires_api_key);
+        assert_eq!(info.supported_languages, vec!["ru-RU"]);
+    }
 
     /// The audio loop tells a provider about mute only when the flag changes.
     #[test]

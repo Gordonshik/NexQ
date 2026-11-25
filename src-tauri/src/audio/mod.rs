@@ -47,6 +47,9 @@ pub struct PartyAudioConfig {
     /// Only used when stt_provider is a local engine like "whisper_cpp".
     #[serde(default)]
     pub local_model_id: Option<String>,
+    /// Folder containing the GigaAM v3 ONNX model and tokenizer.
+    #[serde(default)]
+    pub local_model_path: Option<String>,
     /// Transcription language for this side only (e.g. "es-ES", or "auto").
     /// None or empty means the shared transcription language. Configs saved by
     /// older versions don't have it, hence the default.

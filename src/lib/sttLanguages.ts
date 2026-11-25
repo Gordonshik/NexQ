@@ -115,6 +115,7 @@ const PROVIDER_NAMES: Partial<Record<STTProviderType, string>> = {
   azure_mai_streaming: "Azure MAI Streaming",
   sherpa_onnx: "Sherpa-ONNX",
   ort_streaming: "ORT Streaming",
+  gigaam: "GigaAM v3 RNNT",
 };
 
 /** Whisper.cpp models as people know them; other models show their id. */
@@ -212,6 +213,13 @@ export function sideLanguageHint(
   if (language === AUTO_STT_LANGUAGE) return null;
   const model = autoDetectModelFor(side, models);
   switch (side.provider) {
+    case "gigaam":
+      return languageCode(language) === "ru"
+        ? null
+        : {
+            tone: "warning",
+            text: "GigaAM transcribes Russian only. Choose Russian (ru-RU) for this side.",
+          };
     case "parakeet_tdt":
       if (language === "vi-VN") {
         return {

@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MeetingAudioConfig } from "../lib/types";
 
@@ -6,6 +7,11 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
 vi.mock("@tauri-apps/plugin-store", () => ({
   load: async () => ({ set: async () => {}, get: async () => undefined, onKeyChange: async () => () => {} }),
+}));
+
+vi.mock("../lib/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/ipc")>()),
+  listLocalSTTEngines: async () => [],
 }));
 
 import { ServiceStatusBar } from "./ServiceStatusBar";
@@ -49,6 +55,25 @@ describe("language picker in the status bar", () => {
     });
     render(<ServiceStatusBar />);
     expect(screen.getByTitle("Your STT: Azure MAI Streaming / MAI-Transcribe-2-Streaming")).toBeInTheDocument();
+  });
+
+  it("names GigaAM in the status chip and quick-switches a side with the shared folder", async () => {
+    const folder = "C:\\Models\\GigaAM";
+    useMeetingStore.setState({ isRecording: true, audioMode: "online" });
+    useConfigStore.setState({ gigaamModelPath: folder, meetingAudioConfig: config });
+    const user = userEvent.setup();
+    render(<ServiceStatusBar compact />);
+
+    await user.click(screen.getByTitle("Your STT: Deepgram"));
+    await user.click(await screen.findByRole("button", { name: "GigaAM v3 RNNT" }));
+
+    expect(useConfigStore.getState().meetingAudioConfig?.you).toMatchObject({
+      stt_provider: "gigaam",
+      language: "ru-RU",
+      local_model_path: folder,
+    });
+    expect(useConfigStore.getState().meetingAudioConfig?.you).not.toHaveProperty("local_model_id");
+    expect(screen.getByTitle("Your STT: GigaAM v3 RNNT")).toBeInTheDocument();
   });
 
   it("is absent outside a meeting and in the launcher footer", () => {

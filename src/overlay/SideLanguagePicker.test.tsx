@@ -80,6 +80,21 @@ describe("SideLanguagePicker", () => {
     expect(document.activeElement).toBe(radios[0]);
   });
 
+  it("keeps a GigaAM side on Russian and offers no other language", () => {
+    useConfigStore.setState({
+      meetingAudioConfig: {
+        ...baseConfig,
+        you: { ...baseConfig.you, stt_provider: "gigaam", language: "ru-RU" },
+      },
+    });
+    render(<SideLanguagePicker side="you" />);
+    expect(chip(/You language: Russian/)).toHaveTextContent("RU-RU");
+    fireEvent.click(chip(/You language/));
+    expect(screen.getAllByRole("radio")).toHaveLength(1);
+    expect(screen.getByRole("radio", { name: "Russian" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("radio", { name: "German" })).toBeNull();
+  });
+
   it("saves the pick into meetingAudioConfig like Settings does, and leaves the other side alone", () => {
     render(<SideLanguagePicker side="them" />);
     fireEvent.click(chip(/Them language/));

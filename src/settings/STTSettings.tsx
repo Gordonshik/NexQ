@@ -22,6 +22,7 @@ import {
   testAzureMaiConnection,
   listLocalSTTEngines,
   deleteApiKey,
+  validateGigaamModel,
 } from "../lib/ipc";
 import { storeApiKey, getApiKey, hasApiKey } from "../lib/ipc";
 import {
@@ -35,6 +36,8 @@ import {
   isValidWhisperBaseUrl,
 } from "../lib/whisperApi";
 import type { STTProviderType, LocalSTTEngineInfo, DeepgramConfig, GroqConfig } from "../lib/types";
+import { GIGAAM_LANGUAGE, GIGAAM_NAME, selectGigaam } from "../lib/gigaam";
+import { updatePartyConfig } from "../lib/sideLanguage";
 import { STT_GROUPS, sttGroup, type SttGroupId } from "../lib/sttGroups";
 import {
   CheckCircle,
@@ -57,6 +60,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { LocalModelManager } from "./LocalModelManager";
+import { GigaamModelSettings, type GigaamValidationState } from "./GigaamModelSettings";
 import { open } from "@tauri-apps/plugin-shell";
 
 const GROUP_ICONS: Record<SttGroupId, typeof HardDrive> = { device: HardDrive, builtin: Globe, cloud: Cloud };
@@ -140,6 +144,13 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     requiresApiKey: false,
     credentialKey: "",
     requiresModels: "parakeet_tdt",
+  },
+  {
+    value: "gigaam",
+    label: GIGAAM_NAME,
+    description: "Local offline RNNT, Russian only",
+    requiresApiKey: false,
+    credentialKey: "",
   },
   {
     value: "deepgram",
@@ -309,6 +320,7 @@ export function STTSettings() {
   const setConfigSTTProvider = useConfigStore((s) => s.setSTTProvider);
   const meetingAudioConfig = useConfigStore((s) => s.meetingAudioConfig);
   const setMeetingAudioConfig = useConfigStore((s) => s.setMeetingAudioConfig);
+  const gigaamModelPath = useConfigStore((s) => s.gigaamModelPath);
   const sttLanguage = useConfigStore((s) => s.sttLanguage);
   const setSTTLanguage = useConfigStore((s) => s.setSTTLanguage);
   const activeWhisperModel = useConfigStore((s) => s.activeWhisperModel);
@@ -342,6 +354,8 @@ export function STTSettings() {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
+  const [gigaamValidation, setGigaamValidation] =
+    useState<GigaamValidationState>({ status: "idle", path: null });
 
   const [azureRegion, setAzureRegion] = useState("eastus");
   const [azureMaiRegion, setAzureMaiRegion] = useState("swedencentral");
@@ -477,6 +491,15 @@ export function STTSettings() {
 
   function getBadgeState(p: ProviderOption): BadgeState {
     if (p.alwaysReady) return { text: "Ready", variant: "ready" };
+
+    if (p.value === "gigaam") {
+      if (gigaamValidation.status === "loading") return { text: "Checking", variant: "warning" };
+      if (gigaamValidation.status === "error") return { text: "Invalid", variant: "error" };
+      if (gigaamModelPath && gigaamValidation.status === "ready" && gigaamValidation.path === gigaamModelPath) {
+        return { text: "Ready", variant: "ready" };
+      }
+      return { text: "No Folder", variant: "error" };
+    }
 
     // Batch-only: green "Batch" if model downloaded, amber "Batch" if not
     if (p.batchOnly) {
@@ -642,20 +665,30 @@ export function STTSettings() {
         await setSTTProvider(provider);
         setConfigSTTProvider(provider);
         // Sync meetingAudioConfig so useAudioConfigSync hot-swaps the live capture.
-        if (meetingAudioConfig && meetingAudioConfig.you.stt_provider !== provider) {
-          const { activeModelPerEngine, activeWhisperModel } = useConfigStore.getState();
-          const model = activeModelPerEngine[provider]
-            ?? (provider === "whisper_cpp" ? activeWhisperModel ?? undefined : undefined);
-          setMeetingAudioConfig({
-            ...meetingAudioConfig,
-            you: { ...meetingAudioConfig.you, stt_provider: provider, local_model_id: model },
-          });
+        const state = useConfigStore.getState();
+        const currentConfig = state.meetingAudioConfig;
+        if (currentConfig && currentConfig.you.stt_provider !== provider) {
+          const model = state.activeModelPerEngine[provider]
+            ?? (provider === "whisper_cpp" ? state.activeWhisperModel ?? undefined : undefined);
+          const you = provider === "gigaam"
+            ? {
+                ...selectGigaam(currentConfig.you, state.gigaamModelPath),
+                local_model_id: undefined,
+                local_model_path: state.gigaamModelPath ?? undefined,
+              }
+            : {
+                ...currentConfig.you,
+                stt_provider: provider,
+                local_model_id: model,
+                local_model_path: undefined,
+              };
+          setMeetingAudioConfig(updatePartyConfig(currentConfig, "you", you));
         }
       } catch (e) {
         console.error("Failed to set STT provider:", e);
       }
     },
-    [setConfigSTTProvider, meetingAudioConfig, setMeetingAudioConfig]
+    [setConfigSTTProvider, setMeetingAudioConfig]
   );
 
   const updateVerifiedProvider = useCallback((provider: STTProviderType, verified: boolean) => {
@@ -935,6 +968,20 @@ export function STTSettings() {
     setStatusMessage("Testing...");
 
     try {
+      if (selectedProvider === "gigaam") {
+        const path = gigaamModelPath?.trim();
+        if (!path) {
+          setConnectionStatus("error");
+          setStatusMessage("Choose a GigaAM model folder first.");
+          return;
+        }
+        const info = await validateGigaamModel(path);
+        setGigaamValidation({ status: "ready", path: info.model_dir });
+        setConnectionStatus("success");
+        setStatusMessage(`Ready — ${info.model_name}`);
+        return;
+      }
+
       if (currentProviderOption?.requiresModels) {
         const engines = await listLocalSTTEngines();
         setLocalEngines(engines);
@@ -957,7 +1004,7 @@ export function STTSettings() {
       setConnectionStatus("error");
       setStatusMessage(`Test failed: ${e}`);
     }
-  }, [selectedProvider, currentProviderOption]);
+  }, [selectedProvider, currentProviderOption, gigaamModelPath]);
 
   // Does the selected provider need an inline model panel?
   const showModelPanel = !!currentProviderOption?.requiresModels;
@@ -995,6 +1042,10 @@ export function STTSettings() {
           );
         })}
       </div>
+
+      {selectedProvider === "gigaam" && (
+        <GigaamModelSettings onStatusChange={setGigaamValidation} />
+      )}
 
       {/* Inline Model Panel — shown when the selected provider needs models */}
       {showModelPanel && modelEngineId && (
@@ -1313,18 +1364,27 @@ export function STTSettings() {
           Transcription language
         </h3>
         <select
-          value={sttLanguage}
+          value={selectedProvider === "gigaam" ? GIGAAM_LANGUAGE : sttLanguage}
           onChange={(e) => setSTTLanguage(e.target.value)}
+          disabled={selectedProvider === "gigaam"}
           aria-label="Transcription language"
-          aria-describedby={autoDetectionSelected || showAutoDetectionWarning ? "provider-stt-auto-description" : undefined}
-          className="w-full rounded-lg border border-border/50 bg-background px-3.5 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20"
+          aria-describedby={selectedProvider === "gigaam" ? "gigaam-language-description" : autoDetectionSelected || showAutoDetectionWarning ? "provider-stt-auto-description" : undefined}
+          className="w-full rounded-lg border border-border/50 bg-background px-3.5 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {STT_LANGUAGES.map((lang) => (
+          {(selectedProvider === "gigaam"
+            ? STT_LANGUAGES.filter((lang) => lang.value === GIGAAM_LANGUAGE)
+            : STT_LANGUAGES
+          ).map((lang) => (
             <option key={lang.value} value={lang.value}>
               {lang.label}
             </option>
           ))}
         </select>
+        {selectedProvider === "gigaam" && (
+          <p id="gigaam-language-description" className="mt-2 text-xs text-muted-foreground">
+            GigaAM uses Russian for You. The shared language for other providers is unchanged.
+          </p>
+        )}
         {(autoDetectionSelected || showAutoDetectionWarning) && (
           <div id="provider-stt-auto-description" className={`mt-2 space-y-1 text-xs ${showAutoDetectionWarning ? "text-warning" : "text-muted-foreground"}`}>
             {showAutoDetectionWarning
@@ -1466,6 +1526,7 @@ function ProviderIcon({ value, isSelected }: { value: STTProviderType; isSelecte
     case "ort_streaming":
       return <Zap className={cls} />;
     case "parakeet_tdt":
+    case "gigaam":
       return <Cpu className={cls} />;
     case "deepgram":
     case "whisper_api":
