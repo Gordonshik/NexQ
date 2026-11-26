@@ -30,6 +30,7 @@ import { sanitizePlacement, sanitizeSetups, type SetupEntry, type WindowPlacemen
 import { CLI_AGENTS, cliAgentInfo, cliAgentName, isCliAgent } from "../lib/cliAgents";
 import { clampMinutes, DEFAULT_CONTEXT_SCOPE, SCOPE_KINDS } from "../lib/contextScope";
 import { DEFAULT_OVERLAY_OPACITY } from "../overlay/backing";
+import { withGigaamModelPath } from "../lib/gigaam";
 
 const DEFAULT_DEEPGRAM_CONFIG: DeepgramConfig = {
   model: "nova-3",
@@ -278,6 +279,7 @@ interface ConfigState {
 
   // Two-Party Audio Config (new)
   meetingAudioConfig: MeetingAudioConfig | null;
+  gigaamModelPath: string | null;
 
   // User-saved custom presets (persisted)
   customPresets: MeetingAudioConfig[];
@@ -434,6 +436,7 @@ interface ConfigState {
   setSystemDeviceId: (id: string | null) => void;
   setRecordingEnabled: (enabled: boolean) => void;
   setMeetingAudioConfig: (config: MeetingAudioConfig) => void;
+  setGigaamModelPath: (path: string | null) => void;
   saveCustomPreset: (name: string) => void;
   deleteCustomPreset: (name: string) => void;
   setActiveWhisperModel: (modelId: string | null) => void;
@@ -531,6 +534,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   systemDeviceId: null,
   recordingEnabled: false,
   meetingAudioConfig: null,
+  gigaamModelPath: null,
   customPresets: [],
   activeWhisperModel: null,
   activeModelPerEngine: {},
@@ -757,6 +761,16 @@ export const useConfigStore = create<ConfigState>((set) => ({
     persistValue("micDeviceId", config.you.device_id || null);
     persistValue("systemDeviceId", config.them.device_id || null);
     persistValue("recordingEnabled", config.recording_enabled);
+  },
+  setGigaamModelPath: (path) => {
+    const state = useConfigStore.getState();
+    const modelPath = path?.trim() || null;
+    const meetingAudioConfig = withGigaamModelPath(state.meetingAudioConfig, modelPath);
+    set({ gigaamModelPath: modelPath, meetingAudioConfig });
+    persistValue("gigaamModelPath", modelPath);
+    if (meetingAudioConfig !== state.meetingAudioConfig) {
+      persistValue("meetingAudioConfig", meetingAudioConfig);
+    }
   },
   saveCustomPreset: (name) => {
     const state = useConfigStore.getState();
@@ -1114,6 +1128,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
       const systemDeviceId = await store.get<string | null>("systemDeviceId");
       const recordingEnabled = await store.get<boolean>("recordingEnabled");
       const meetingAudioConfig = await store.get<MeetingAudioConfig>("meetingAudioConfig");
+      const gigaamModelPath = await store.get<string | null>("gigaamModelPath");
       const customPresets = await store.get<MeetingAudioConfig[]>("customPresets");
       const autoTrigger = await store.get<boolean>("autoTrigger");
       const autoSummary = await store.get<boolean>("autoSummary");
@@ -1311,9 +1326,23 @@ export const useConfigStore = create<ConfigState>((set) => ({
         console.log("[configStore] Created default meetingAudioConfig (Web Speech + Deepgram)");
       }
 
+      const savedGigaamPath = gigaamModelPath?.trim()
+        || [resolvedMeetingConfig?.you, resolvedMeetingConfig?.them]
+          .find((party) => party?.stt_provider === "gigaam")?.local_model_path?.trim()
+        || null;
+      const projectedMeetingConfig = withGigaamModelPath(resolvedMeetingConfig, savedGigaamPath);
+      if (projectedMeetingConfig !== resolvedMeetingConfig) {
+        resolvedMeetingConfig = projectedMeetingConfig;
+        persistValue("meetingAudioConfig", resolvedMeetingConfig);
+      }
+      if (savedGigaamPath && gigaamModelPath == null) {
+        await store.set("gigaamModelPath", savedGigaamPath);
+      }
+
       set((state) => ({
         ...state,
         _loaded: true,
+        gigaamModelPath: savedGigaamPath,
         ...(theme != null && { theme }),
         ...(sttProvider != null && { sttProvider }),
         ...(sttLanguage != null && { sttLanguage }),
@@ -1419,6 +1448,13 @@ export const useConfigStore = create<ConfigState>((set) => ({
       // update this window's Zustand state automatically.
       store.onKeyChange<MeetingAudioConfig>("meetingAudioConfig", (val) => {
         if (val != null) set({ meetingAudioConfig: val });
+      });
+      store.onKeyChange<string>("gigaamModelPath", (val) => {
+        const path = val?.trim() || null;
+        set((state) => ({
+          gigaamModelPath: path,
+          meetingAudioConfig: withGigaamModelPath(state.meetingAudioConfig, path),
+        }));
       });
       store.onKeyChange<string>("activeWhisperModel", (val) => {
         if (val !== undefined) set({ activeWhisperModel: val ?? null });

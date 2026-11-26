@@ -14,6 +14,8 @@ import {
   type SideLanguageHint,
 } from "../lib/sttLanguages";
 import { sideLanguageProblems, updatePartyConfig } from "../lib/sideLanguage";
+import { GIGAAM_LANGUAGE, GIGAAM_NAME, selectGigaam } from "../lib/gigaam";
+import { GigaamModelSettings } from "./GigaamModelSettings";
 import {
   listAudioDevices,
   setRecordingEnabled,
@@ -102,6 +104,13 @@ const STT_OPTIONS: {
     icon: <Cpu className="h-3.5 w-3.5" />,
     requiresKey: false,
     requiresDownload: "parakeet_tdt",
+  },
+  {
+    value: "gigaam",
+    label: GIGAAM_NAME,
+    shortLabel: "GigaAM",
+    icon: <Cpu className="h-3.5 w-3.5" />,
+    requiresKey: false,
   },
   {
     value: "deepgram",
@@ -494,6 +503,10 @@ export function MeetingAudioSettings() {
         />
       </div>
 
+      {(config.you.stt_provider === "gigaam" || config.them.stt_provider === "gigaam") && (
+        <GigaamModelSettings />
+      )}
+
       {/* ── Diarization Toggle — only shown when Deepgram or Azure is active ── */}
       {(["deepgram", "azure_speech"] as STTProviderType[]).some(
         (p) => config.you.stt_provider === p || config.them.stt_provider === p
@@ -773,7 +786,22 @@ function PartyPanel({
   }
 
   function handleProviderChange(newProvider: STTProviderType) {
-    const updates: Partial<PartyAudioConfig> = { stt_provider: newProvider };
+    if (newProvider === "gigaam") {
+      const selected = selectGigaam(party, useConfigStore.getState().gigaamModelPath);
+      onChange({
+        ...selected,
+        local_model_id: undefined,
+        local_model_path: selected.local_model_path,
+      });
+      import("../stores/devLogStore").then(({ useDevLogStore }) => {
+        useDevLogStore.getState().addEntry("info", "config", `[${party.role === "You" ? "You" : "Them"}] Provider → ${GIGAAM_NAME}`);
+      });
+      return;
+    }
+    const updates: Partial<PartyAudioConfig> = {
+      stt_provider: newProvider,
+      local_model_path: undefined,
+    };
     if (newProvider === "sherpa_onnx" || newProvider === "ort_streaming" || newProvider === "parakeet_tdt") {
       // Use per-engine active model, falling back to legacy activeWhisperModel
       const activeModelPerEngine = useConfigStore.getState().activeModelPerEngine;
@@ -919,16 +947,23 @@ function PartyPanel({
             <select
               id={`party-language-${role}`}
               aria-label={`${sideName} language`}
-              value={party.language ?? SAME_AS_SHARED_LANGUAGE}
+              value={party.stt_provider === "gigaam" ? GIGAAM_LANGUAGE : party.language ?? SAME_AS_SHARED_LANGUAGE}
               onChange={(e) => onChange({ language: e.target.value || undefined })}
-              className="w-full cursor-pointer rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20"
+              disabled={party.stt_provider === "gigaam"}
+              className="w-full cursor-pointer rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <option value={SAME_AS_SHARED_LANGUAGE}>Default: {sharedLanguageLabel}</option>
-              {STT_LANGUAGES.map((lang) => (
-                <option key={lang.value} value={lang.value}>
-                  {lang.label}
-                </option>
-              ))}
+              {party.stt_provider === "gigaam" ? (
+                <option value={GIGAAM_LANGUAGE}>Russian</option>
+              ) : (
+                <>
+                  <option value={SAME_AS_SHARED_LANGUAGE}>Default: {sharedLanguageLabel}</option>
+                  {STT_LANGUAGES.map((lang) => (
+                    <option key={lang.value} value={lang.value}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
         )}

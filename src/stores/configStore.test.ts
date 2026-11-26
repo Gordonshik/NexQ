@@ -423,8 +423,7 @@ describe("configStore: hotkeys", () => {
   });
 });
 
-describe("configStore: STT migration and the preset chip", () => {
-  beforeEach(() => {
+describe("configStore: STT migration and the preset chip", () => {  beforeEach(() => {
     saved.clear();
     vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -457,5 +456,31 @@ describe("configStore: STT migration and the preset chip", () => {
     await store.getState().loadConfig();
 
     expect(store.getState().meetingAudioConfig?.preset_name).toBe("In-Person");
+  });
+
+  it("persists one GigaAM folder and projects it to both sides", async () => {
+    saved.set("meetingAudioConfig", {
+      you: { role: "You", device_id: "Mic", is_input_device: true, stt_provider: "gigaam", language: "ru-RU" },
+      them: { role: "Them", device_id: "Speakers", is_input_device: false, stt_provider: "gigaam", language: "ru-RU" },
+      recording_enabled: false,
+      preset_name: null,
+    });
+    const store = await freshStore();
+    await store.getState().loadConfig();
+    store.getState().setGigaamModelPath("  C:\\GigaPisar\\model  ");
+
+    expect(store.getState().gigaamModelPath).toBe("C:\\GigaPisar\\model");
+    expect(store.getState().meetingAudioConfig?.you.local_model_path).toBe("C:\\GigaPisar\\model");
+    expect(store.getState().meetingAudioConfig?.them.local_model_path).toBe("C:\\GigaPisar\\model");
+    await vi.waitFor(() => expect(saved.get("gigaamModelPath")).toBe("C:\\GigaPisar\\model"));
+    expect(saved.get("meetingAudioConfig")).toMatchObject({
+      you: { local_model_path: "C:\\GigaPisar\\model" },
+      them: { local_model_path: "C:\\GigaPisar\\model" },
+    });
+
+    store.getState().setGigaamModelPath("");
+    expect(store.getState().gigaamModelPath).toBeNull();
+    expect(store.getState().meetingAudioConfig?.you).not.toHaveProperty("local_model_path");
+    expect(store.getState().meetingAudioConfig?.them).not.toHaveProperty("local_model_path");
   });
 });

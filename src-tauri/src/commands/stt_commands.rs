@@ -68,7 +68,10 @@ pub async fn set_stt_provider(app: AppHandle, provider: String) -> Result<(), St
                 STTProviderType::WebSpeech => {
                     // Frontend-only — no API key needed
                 }
-                STTProviderType::SherpaOnnx | STTProviderType::OrtStreaming | STTProviderType::ParakeetTdt => {
+                STTProviderType::SherpaOnnx
+                | STTProviderType::OrtStreaming
+                | STTProviderType::ParakeetTdt
+                | STTProviderType::GigaAM => {
                     // Local providers — no API key needed
                 }
             }
@@ -150,7 +153,10 @@ pub async fn test_stt_connection(app: AppHandle, provider: String) -> Result<boo
                 }
                 STTProviderType::WindowsNative | STTProviderType::WhisperCpp => {}
                 STTProviderType::WebSpeech => {}
-                STTProviderType::SherpaOnnx | STTProviderType::OrtStreaming | STTProviderType::ParakeetTdt => {
+                STTProviderType::SherpaOnnx
+                | STTProviderType::OrtStreaming
+                | STTProviderType::ParakeetTdt
+                | STTProviderType::GigaAM => {
                     // Local providers — no API key needed
                 }
             }
@@ -251,6 +257,28 @@ pub async fn get_available_stt_providers() -> Result<String, String> {
     let providers = provider::list_available_providers();
     serde_json::to_string(&providers)
         .map_err(|e| format!("Failed to serialize providers: {}", e))
+}
+
+/// Detect the default GigaPisar model installation.
+#[command]
+pub async fn detect_gigaam_model(app: AppHandle) -> Result<crate::stt::gigaam::GigaAmModelInfo, String> {
+    let manager = app.state::<AppState>().gigaam.clone();
+    tokio::task::spawn_blocking(move || manager.inspect(None))
+        .await
+        .map_err(|error| format!("GigaAM model inspection task failed: {error}"))?
+}
+
+/// Load a user-selected GigaAM model and verify its ONNX inference contract.
+#[command]
+pub async fn validate_gigaam_model(
+    app: AppHandle,
+    model_path: String,
+) -> Result<crate::stt::gigaam::GigaAmModelInfo, String> {
+    let manager = app.state::<AppState>().gigaam.clone();
+    let selected = std::path::PathBuf::from(model_path);
+    tokio::task::spawn_blocking(move || manager.validate(Some(&selected)))
+        .await
+        .map_err(|error| format!("GigaAM model validation task failed: {error}"))?
 }
 
 /// Ensure the STTRouter is initialized in the app state.

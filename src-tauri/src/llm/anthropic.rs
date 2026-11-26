@@ -471,8 +471,8 @@ mod thinking_tests {
 
     fn body(model: &str, setting: ThinkingSetting, with: bool) -> (serde_json::Value, bool) {
         let messages = vec![
-            LLMMessage { role: "system".into(), content: "sys".into() },
-            LLMMessage { role: "user".into(), content: "hi".into() },
+            LLMMessage::text("system", "sys"),
+            LLMMessage::text("user", "hi"),
         ];
         build_messages_body(&messages, model, &GenerationParams::default(), setting, with)
     }
@@ -511,8 +511,8 @@ mod thinking_tests {
     #[test]
     fn cache_system_marks_the_stable_system_block_for_the_prompt_cache() {
         let messages = vec![
-            LLMMessage { role: "system".into(), content: "stable".into() },
-            LLMMessage { role: "user".into(), content: "hi".into() },
+            LLMMessage::text("system", "stable"),
+            LLMMessage::text("user", "hi"),
         ];
         let params = GenerationParams { cache_system: true, ..Default::default() };
         let (b, _) = build_messages_body(&messages, "claude-sonnet-5-5", &params, ThinkingSetting::Auto, true);

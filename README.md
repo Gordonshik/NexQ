@@ -61,7 +61,7 @@ It transcribes both sides of a call live and answers from your own notes, with l
 - **Answers in the moment.** Questions are caught as they are asked. Press one key, or turn on Auto-Answer, and the answer streams in, grounded in your notes, slides or other files.
 - **A workspace for each piece of work.** Keep a client's meetings, files, notes and memory together and apart from everything else. Ask across all of it afterwards, with sources.
 - **Yours to run.** Free, MIT licensed, no account and no usage caps. No bot joins your call. Use fully offline engines or the cloud providers you pick.
-- **Bring your own models.** 12 speech-to-text engines and 10 LLM providers, including your existing Claude or ChatGPT subscription.
+- **Bring your own models.** 13 speech-to-text engines and 10 LLM providers, including your existing Claude or ChatGPT subscription.
 - **Private notes while you present.** Hide from screen share (off by default) leaves the overlay out of screen shares and recordings, and off the taskbar or Dock. See [Use it responsibly](#use-it-responsibly).
 
 ## What's new in 3.0
@@ -83,7 +83,8 @@ Earlier releases:
 - **v2.44 Codex.** Use your ChatGPT plan like Claude, with Fast and Deep models, live model lists and personal sources. Beta.
 - **v2.41 Personal sources.** Let Claude look things up in your notes folders and MCP servers while it answers. Claude subscription only.
 - **v2.40 Thinking control.** Choose how much each provider's model thinks.
-- **v2.38 and v2.39 Language per side.** Transcribe each side in its own language, switch it from the overlay without ending the meeting, or let NexQ detect it.
+- **v2.38 and v2.39 Language per side.** Transcribe each side in its own language, switch it from the overlay without ending the meeting, or let NexQ detect it. Ukrainian was added.
+- **v2.38 Screenshot into Ask.** <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> attaches your screen to a question (Windows, Claude subscription or a vision-capable local/custom model).
 
 ## Quick start
 
@@ -120,7 +121,7 @@ How-to: [Workspaces for clients and projects](https://getnexq.com/guides/workspa
 
 - **Both sides, apart.** Your mic and the system audio, each with its own engine, language and mute, with speaker labels, remote-speaker separation and echo cancellation.
 - **One key answers.** Assist, What to Say, Shorten, Follow-Up, Recap and free-form Ask. Question detection catches what was asked, with optional Auto-Answer. Scenarios for interviews, lectures, oral exam practice, webinars and team meetings, with editable prompts.
-- **Knowledge and Tools pills.** Decide per answer whether it may use the meeting's workspace files and tools. Ask about your screen with a screenshot (Claude subscription).
+- **Knowledge and Tools pills.** Decide per answer whether it may use the meeting's workspace files and tools. Ask about your screen with a screenshot (Claude subscription or a vision-capable local/custom model).
 - **Talking points that follow you.** Manual, Auto-scroll or **My voice**, which follows what you say on your own PC. Lines you have said are ticked off, and **Go to** offers the point you seem to be on.
 - **Live notes and the brief.** A tidy page of topics, decisions, tasks and questions as you talk, and a short sheet of what the workspace knows about the topic that your answers can use.
 - **Live translation** with 5 providers: Microsoft and Google cover 100+ languages, OPUS-MT runs offline.
@@ -143,7 +144,7 @@ How-to: [Workspaces for clients and projects](https://getnexq.com/guides/workspa
 
 ### Your AI
 
-- 12 speech-to-text engines, 10 LLM providers and 5 translation providers. Run everything on your PC, or use your own keys.
+- 13 speech-to-text engines, 10 LLM providers and 5 translation providers. Run everything on your PC, or use your own keys.
 - Use your **Claude** or **ChatGPT (Codex)** subscription with no API key (beta), including personal sources: notes folders and MCP servers.
 - Thinking control per provider, and an AI Call Log with every prompt, latency and token count.
 
@@ -224,7 +225,7 @@ Audio is captured on your machine. What leaves it depends on the engines you pic
 
 | | Runs on your device | Cloud |
 |---|---|---|
-| **Speech-to-text (12)** | Parakeet TDT, Sherpa-ONNX, ORT Streaming, Whisper.cpp (recordings only, not live calls) | Deepgram, Groq Whisper, Whisper API, Azure Speech, Azure MAI Streaming (public preview), Cartesia, Web Speech (no key, mic only), Windows Speech (no key, Windows, mic only) |
+| **Speech-to-text (13)** | Parakeet TDT, Sherpa-ONNX, ORT Streaming, GigaAM (local ONNX export, Russian), Whisper.cpp (recordings only, not live calls) | Deepgram, Groq Whisper, Whisper API, Azure Speech, Azure MAI Streaming (public preview), Cartesia, Web Speech (no key, mic only), Windows Speech (no key, Windows, mic only) |
 | **LLM (10)** | Ollama, LM Studio | OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, any custom endpoint, and, with no API key (beta): Claude through your Pro or Max plan (Claude Code CLI), Codex through your ChatGPT plan |
 | **Translation (5)** | OPUS-MT (offline) | DeepL, Google, Microsoft, or any LLM you configured |
 
@@ -263,7 +264,7 @@ Details: [The Library](docs/user-guide/library.md) and the [Claude subscription 
 - **Secrets go to the OS credential store.** Windows Credential Manager or the macOS Keychain.
 - **No telemetry or analytics.** Besides the providers you configure and the models you download, NexQ only contacts GitHub, to check for signed updates and show release notes.
 - **Hide from screen share** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>) works on Windows 10 version 2004 and later, and on macOS. On macOS 14 and later, some recorders that use ScreenCaptureKit can still capture NexQ, so run a test share first. It also hides NexQ from the taskbar (Windows) or the Dock and <kbd>Cmd</kbd>+<kbd>Tab</kbd> (macOS).
-- **Claude screenshots** can contain other people's video or documents. They go to Anthropic with your question, and NexQ does not save them.
+- **Screenshots** can contain other people's video or documents. They go to the AI provider you chose with your question, and NexQ does not save them.
 - Found a security issue? Follow [SECURITY.md](SECURITY.md).
 
 ## Use it responsibly
@@ -295,7 +296,7 @@ On macOS, use <kbd>Cmd</kbd> in place of <kbd>Ctrl</kbd>. The three <kbd>Ctrl</k
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | Start or end a meeting |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | Switch between the overlay and the dashboard |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> | Assist from any app, without switching windows |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Capture the screen into Ask (Claude subscription, Windows) |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Capture the screen into Ask (Claude subscription or a local model, Windows) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> | Hide from screen share |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Open or close Settings |
 

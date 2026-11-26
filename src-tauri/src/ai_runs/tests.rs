@@ -703,18 +703,18 @@ async fn a_chat_session_is_reused_sends_only_the_new_turn_and_replays_history_on
     let key = chat_key("c1");
     let mut first = cli_req("claude_cli", "sonnet", None, &key, "second question");
     first.messages = vec![
-        LLMMessage { role: "user".into(), content: "first question".into() },
-        LLMMessage { role: "assistant".into(), content: "first answer".into() },
-        LLMMessage { role: "user".into(), content: "second question".into() },
+        LLMMessage::text("user", "first question"),
+        LLMMessage::text("assistant", "first answer"),
+        LLMMessage::text("user", "second question"),
     ];
     r.runs.run(first, None).await.unwrap();
     let mut again = cli_req("claude_cli", "sonnet", None, &key, "third question");
     again.messages = vec![
-        LLMMessage { role: "user".into(), content: "first question".into() },
-        LLMMessage { role: "assistant".into(), content: "first answer".into() },
-        LLMMessage { role: "user".into(), content: "second question".into() },
-        LLMMessage { role: "assistant".into(), content: "x".into() },
-        LLMMessage { role: "user".into(), content: "third question".into() },
+        LLMMessage::text("user", "first question"),
+        LLMMessage::text("assistant", "first answer"),
+        LLMMessage::text("user", "second question"),
+        LLMMessage::text("assistant", "x"),
+        LLMMessage::text("user", "third question"),
     ];
     r.runs.run(again, None).await.unwrap();
 

@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
-    cancellable, check_cancelled, is_cancelled, emit_end, emit_error, emit_token, TokenSink,
+    cancellable, check_cancelled, is_cancelled, emit_end, emit_error, emit_token, openai_message_json,
+    TokenSink,
 };
 use super::stream_parser::{LineBuffer, SSEParser};
 use super::thinking::{self, RequestOptions, Sent, ThinkingSetting};
@@ -45,10 +46,7 @@ pub(crate) fn build_chat_body(
     extra: Option<&serde_json::Map<String, serde_json::Value>>,
     with_thinking: bool,
 ) -> (serde_json::Value, bool) {
-    let msgs: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|m| json!({ "role": m.role, "content": m.content }))
-        .collect();
+    let msgs: Vec<serde_json::Value> = messages.iter().map(openai_message_json).collect();
 
     // OpenRouter: ":online" suffix enables web search grounding (via Exa) for any model.
     let model_id = if params.enable_web_search && provider == "openrouter" {
@@ -352,12 +350,26 @@ mod thinking_tests {
     use crate::llm::thinking::{parse_extra_request, ThinkingSetting::*};
 
     fn user() -> Vec<LLMMessage> {
-        vec![LLMMessage { role: "user".into(), content: "hi".into() }]
+        vec![LLMMessage::text("user", "hi")]
     }
 
     fn body(provider: &str, model: &str, setting: ThinkingSetting) -> serde_json::Value {
         let params = GenerationParams { temperature: Some(0.3), max_tokens: Some(50), ..Default::default() };
         build_chat_body(provider, &user(), model, &params, setting, None, true).0
+    }
+
+    #[test]
+    fn an_attached_image_becomes_a_data_url_part() {
+        let mut message = LLMMessage::text("user", "what is this?");
+        message.images = vec![crate::llm::cli_agent::protocol::ImageAttachment {
+            media_type: "image/png".into(),
+            data: "AAAA".into(),
+        }];
+        let (body, _) = build_chat_body("lm_studio", &[message], "m", &GenerationParams::default(), Auto, None, true);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content[0], json!({ "type": "text", "text": "what is this?" }));
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,AAAA");
     }
 
     #[test]

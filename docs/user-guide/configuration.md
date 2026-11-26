@@ -79,15 +79,25 @@ NexQ uses a two-party audio model: **"You"** (microphone) and **"Them"** (system
 
 See [Choosing AI Providers](ai-providers.md#azure-mai-streaming-public-preview) for portal setup, the exact setup steps, and a live verification checklist.
 
-### Local engines (Sherpa-ONNX, ORT Streaming, Parakeet TDT)
+### Local engines (Sherpa-ONNX, ORT Streaming, Parakeet TDT, GigaAM)
 
-- **Setup**: Download a model from Settings > STT Providers (each local engine has its own model list)
+- **Setup**: Download a bundled model from Settings > STT Providers, or choose a local GigaAM export folder as described below
 - **Requires API Key**: No
 - **Runs Locally**: Yes
 - **Best For**: Offline use, privacy-sensitive environments
-- **Live engines**: Sherpa-ONNX, ORT Streaming and Parakeet TDT. These are the local choices for "You" and "Them" in Settings > Audio & Devices
+- **Live engines**: Sherpa-ONNX, ORT Streaming, Parakeet TDT and GigaAM. These are local choices for "You" and "Them" in Settings > Audio & Devices
 - **Whisper.cpp**: Not a live engine. It only transcribes recorded meetings in batch, so Settings > Audio & Devices doesn't offer it for a live meeting. A saved setup that still names it is switched to another engine at the next launch
 - **Note**: Local models require significant CPU/RAM. Smaller models are faster but less accurate; larger ones are more accurate but slower.
+
+### GigaAM
+
+- **Setup**: In Settings > STT Providers, choose the folder containing a GigaAM `v3_e2e_rnnt` ONNX export. The folder must contain `v3_e2e_rnnt.yaml`, `v3_e2e_rnnt_encoder.onnx`, `v3_e2e_rnnt_decoder.onnx`, `v3_e2e_rnnt_joint.onnx`, and `v3_e2e_rnnt_tokenizer.model`. A default `GigaPisar\model` installation is detected when present.
+- **Requires API Key**: No
+- **Runs Locally**: Yes, through ONNX Runtime; no Python process is started
+- **Languages**: Russian only. Selecting GigaAM sets the party language to Russian; Auto-detect and non-Russian side languages are refused.
+- **Shared model**: "You" and "Them" use one loaded engine, even when both select GigaAM. Inference is serialized, and the engine unloads when neither party uses it.
+- **Results**: Final-only transcription after a pause, an idle flush, or at most 20 seconds of audio. Silence is skipped, and there are no interim words.
+- **Compatibility**: The model is validated by loading all three ONNX sessions and running a short test. A reference-hash mismatch is shown as a warning so locally re-exported models can still be tested.
 
 ### Windows Native Speech
 

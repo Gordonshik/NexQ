@@ -657,6 +657,11 @@ export function LLMSettings() {
               </p>
             </div>
           )}
+          {(isCustom || isLocal) && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Screenshots and pasted images need a vision-capable model.
+            </p>
+          )}
         </div>
       )}
 

@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
+import type { STTProviderType } from "../lib/types";
 import { useMeetingStore } from "../stores/meetingStore";
 import { skipYouStt } from "../lib/audioMode";
 import { onCaptureWarning, onSTTConnectionStatus } from "../lib/events";
@@ -20,6 +21,7 @@ export const RESTART_STATE_MS = 6000;
 
 export interface SideLanguageInfo {
   side: LanguageSide;
+  provider: STTProviderType;
   /** "You", "Them", or "Room" (the room microphone of an in-person meeting). */
   label: string;
   /** This side's own pick; SAME_AS_SHARED_LANGUAGE ("") follows the shared language. */
@@ -119,6 +121,7 @@ export function useSideLanguages(): SideLanguages {
     const effective = sideLanguage(party, sharedLanguage);
     return {
       side,
+      provider: party.stt_provider,
       label,
       value: party.language ?? SAME_AS_SHARED_LANGUAGE,
       effective,

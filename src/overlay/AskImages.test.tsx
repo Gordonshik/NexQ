@@ -1,12 +1,15 @@
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AskImageChips, IMAGES_NEED_CLAUDE, askPlaceholder, useAskImages } from "./AskImages";
+import { AskImageChips, IMAGES_NEED_VISION, askPlaceholder, useAskImages } from "./AskImages";
 import { MAX_IMAGES } from "../lib/imageAttachments";
 import { useConfigStore } from "../stores/configStore";
 import { useToastStore } from "../stores/toastStore";
+import { useAgentStore } from "../stores/agentStore";
+import type { CliAgentStatus } from "../lib/types";
 
 beforeEach(() => {
   useConfigStore.setState({ llmProvider: "claude_cli" });
+  useAgentStore.setState({ statuses: {} });
   useToastStore.setState({ toasts: [] });
   // jsdom can't decode images: every pasted file is a small 100x100 picture.
   vi.stubGlobal("createImageBitmap", async () => ({ width: 100, height: 100, close: () => {} }));
@@ -17,6 +20,16 @@ afterEach(() => {
 });
 
 const png = (name: string) => new File([name], `${name}.png`, { type: "image/png" });
+
+const outdatedClaude: CliAgentStatus = {
+  kind: "claude_cli",
+  installed: true,
+  binary_path: "claude.exe",
+  version: "2.1.206 (Claude Code)",
+  auth: { logged_in: true, auth_method: "claude.ai", subscription_type: "max", email: "me@example.com", login: "subscription" },
+  npm_only: false,
+  required_version: "2.1.259",
+};
 
 /** A paste event whose clipboard holds `files` and, optionally, text. */
 function paste(files: File[], text = "") {
@@ -44,6 +57,42 @@ describe("useAskImages", () => {
     await waitFor(() => expect(result.current.announcement).toBe("Image attached (1 of 3)"));
   });
 
+  it("attaches a paste with a local model", async () => {
+    useConfigStore.setState({ llmProvider: "ollama" });
+    const { result } = renderHook(() => useAskImages());
+    expect(result.current.canAttach).toBe(true);
+    await act(async () => result.current.onPaste(paste([png("a")]).event));
+    await waitFor(() => expect(result.current.images).toHaveLength(1));
+  });
+
+  it("attaches a paste with a custom endpoint", async () => {
+    useConfigStore.setState({ llmProvider: "custom" });
+    const { result } = renderHook(() => useAskImages());
+    expect(result.current.canAttach).toBe(true);
+    await act(async () => result.current.onPaste(paste([png("a")]).event));
+    await waitFor(() => expect(result.current.images).toHaveLength(1));
+  });
+
+  it("attaches with a custom endpoint even when Claude is outdated", async () => {
+    useConfigStore.setState({ llmProvider: "custom" });
+    useAgentStore.setState({ statuses: { claude_cli: outdatedClaude } });
+    const { result } = renderHook(() => useAskImages());
+    expect(result.current.canAttach).toBe(true);
+    await act(async () => result.current.attach([png("a")]));
+    await waitFor(() => expect(result.current.images).toHaveLength(1));
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("keeps Claude images attachable so a vision-capable fallback can answer", async () => {
+    useAgentStore.setState({ statuses: { claude_cli: outdatedClaude } });
+    const { result } = renderHook(() => useAskImages());
+    expect(result.current.canAttach).toBe(true);
+    await act(async () => result.current.attach([png("a")]));
+    await waitFor(() => expect(result.current.images).toHaveLength(1));
+    expect(useToastStore.getState().toasts).toEqual([]);
+    expect(askPlaceholder(result.current.canAttach)).toBe("Ask or paste a screenshot");
+  });
+
   it("with another provider takes the paste, attaches nothing and warns", async () => {
     useConfigStore.setState({ llmProvider: "openai" });
     const { result } = renderHook(() => useAskImages());
@@ -54,7 +103,7 @@ describe("useAskImages", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.images).toHaveLength(0);
     expect(useToastStore.getState().toasts).toEqual([
-      expect.objectContaining({ message: IMAGES_NEED_CLAUDE, type: "warning" }),
+      expect.objectContaining({ message: IMAGES_NEED_VISION, type: "warning" }),
     ]);
   });
 
@@ -126,7 +175,7 @@ describe("useAskImages", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.images).toHaveLength(0);
     expect(useToastStore.getState().toasts).toEqual([
-      expect.objectContaining({ message: IMAGES_NEED_CLAUDE, type: "warning" }),
+      expect.objectContaining({ message: IMAGES_NEED_VISION, type: "warning" }),
     ]);
   });
 

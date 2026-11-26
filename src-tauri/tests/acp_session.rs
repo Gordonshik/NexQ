@@ -16,13 +16,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// Build `fake_acp` once and return its path (next to this test binary's
-/// `deps` dir, so it follows whatever target dir / profile cargo used).
+/// Build `fake_acp` once and return the executable path reported by Cargo.
 fn fake_bin() -> PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
         let mut cmd = std::process::Command::new(env!("CARGO"));
-        cmd.args(["build", "--example", "fake_acp"]).current_dir(env!("CARGO_MANIFEST_DIR"));
+        cmd.args(["build", "--example", "fake_acp", "--message-format=json"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"));
         // Drop the per-crate vars cargo injects into test processes: build scripts
         // watch CARGO_MANIFEST_DIR / OUT_DIR, so inheriting them would force a
         // full rebuild on every run.
@@ -38,9 +38,22 @@ fn fake_bin() -> PathBuf {
             cmd.arg("--release");
         }
         let out = cmd.output().expect("run cargo build --example fake_acp");
-        assert!(out.status.success(), "building fake_acp failed:\n{}", String::from_utf8_lossy(&out.stderr));
-        let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-        let bin = profile_dir.join("examples").join(format!("fake_acp{}", std::env::consts::EXE_SUFFIX));
+        assert!(
+            out.status.success(),
+            "building fake_acp failed:\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let bin = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|msg| {
+                msg["reason"] == "compiler-artifact"
+                    && msg["target"]["name"] == "fake_acp"
+                    && msg["executable"].is_string()
+            })
+            .and_then(|msg| msg["executable"].as_str().map(PathBuf::from))
+            .expect("cargo did not report the fake_acp executable");
         assert!(bin.is_file(), "missing {}", bin.display());
         bin
     })

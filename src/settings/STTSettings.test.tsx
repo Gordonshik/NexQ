@@ -12,12 +12,16 @@ const azureMai = vi.hoisted(() => ({
   sttTest: vi.fn(),
   store: vi.fn(),
   delete: vi.fn(),
+  detectGigaam: vi.fn(),
+  validateGigaam: vi.fn(),
 }));
 const shell = vi.hoisted(() => ({ open: vi.fn() }));
+const dialog = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => null }));
 vi.mock("@tauri-apps/plugin-shell", () => shell);
+vi.mock("@tauri-apps/plugin-dialog", () => dialog);
 vi.mock("@tauri-apps/plugin-store", () => ({
   load: async () => ({ set: async () => {}, get: async () => undefined, onKeyChange: async () => () => {} }),
 }));
@@ -29,6 +33,8 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   deleteApiKey: (provider: string) => azureMai.delete(provider),
   testAzureMaiConnection: (key: string, region: string) => azureMai.probe(key, region),
   testSTTConnection: (provider: string) => azureMai.sttTest(provider),
+  detectGigaamModel: () => azureMai.detectGigaam(),
+  validateGigaamModel: (path: string) => azureMai.validateGigaam(path),
   listLocalSTTEngines: async () => [],
 }));
 
@@ -57,6 +63,23 @@ beforeEach(() => {
     azureMai.credentials.delete(provider);
   });
   shell.open.mockReset().mockResolvedValue(undefined);
+  dialog.open.mockReset().mockResolvedValue(null);
+  azureMai.detectGigaam.mockReset().mockResolvedValue({
+    model_dir: "C:\\Models\\GigaPisar\\model",
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  });
+  azureMai.validateGigaam.mockReset().mockImplementation(async (path: string) => ({
+    model_dir: path,
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  }));
   useMeetingStore.setState({ audioMode: "online" });
   useConfigStore.setState({
     sttLanguage: "auto",
@@ -64,9 +87,229 @@ beforeEach(() => {
     meetingAudioConfig: config,
     deepgramConfig: { ...useConfigStore.getState().deepgramConfig, model: "nova-3" },
     verifiedCloudProviders: [],
+    gigaamModelPath: null,
   });
 });
 afterEach(cleanup);
+
+it("selects GigaAM with the shared folder and a Russian-only You side", async () => {
+  const folder = "C:\\Models\\GigaPisar\\model";
+  useConfigStore.setState({
+    gigaamModelPath: folder,
+    meetingAudioConfig: {
+      ...config,
+      you: { ...config.you, local_model_id: "old-model", language: "en-US" },
+    },
+  });
+  const user = userEvent.setup();
+  render(<STTSettings />);
+
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  await waitFor(() => expect(useConfigStore.getState().sttProvider).toBe("gigaam"));
+  const you = useConfigStore.getState().meetingAudioConfig?.you;
+  expect(you).toMatchObject({ stt_provider: "gigaam", language: "ru-RU", local_model_path: folder });
+  expect(you).not.toHaveProperty("local_model_id");
+  expect(useConfigStore.getState().meetingAudioConfig?.them).toEqual(config.them);
+  expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue(folder);
+});
+
+it("clears the GigaAM folder when You switches to another provider", async () => {
+  const folder = "C:\\Models\\GigaPisar\\model";
+  useConfigStore.setState({
+    sttProvider: "gigaam",
+    gigaamModelPath: folder,
+    meetingAudioConfig: {
+      ...config,
+      you: { ...config.you, stt_provider: "gigaam", language: "ru-RU", local_model_path: folder },
+    },
+  });
+  const user = userEvent.setup();
+  render(<STTSettings />);
+
+  await user.click(screen.getByRole("button", { name: /^Deepgram/ }));
+
+  await waitFor(() => expect(useConfigStore.getState().sttProvider).toBe("deepgram"));
+  expect(useConfigStore.getState().meetingAudioConfig?.you.stt_provider).toBe("deepgram");
+  expect(useConfigStore.getState().meetingAudioConfig?.you).not.toHaveProperty("local_model_path");
+});
+
+it("detects, validates and stores one GigaAM folder for the selected side", async () => {
+  const detected = "C:\\Models\\GigaPisar\\model";
+  const chosen = "D:\\Models\\GigaAM";
+  azureMai.detectGigaam.mockResolvedValue({
+    model_dir: detected,
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  });
+  dialog.open.mockResolvedValue(chosen);
+  const user = userEvent.setup();
+  render(<STTSettings />);
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  await user.click(screen.getByRole("button", { name: "Detect Default Folder" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue(detected));
+  expect(azureMai.validateGigaam).toHaveBeenCalledWith(detected);
+
+  await user.click(screen.getByRole("button", { name: "Choose Folder" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue(chosen));
+  expect(azureMai.validateGigaam).toHaveBeenCalledWith(chosen);
+  expect(useConfigStore.getState().gigaamModelPath).toBe(chosen);
+  expect(useConfigStore.getState().meetingAudioConfig?.you.local_model_path).toBe(chosen);
+  expect(screen.getByText(/v3_e2e_rnnt/)).toBeInTheDocument();
+  expect(screen.getByText("16 kHz · 64 mel bins · 1024 vocabulary tokens")).toBeInTheDocument();
+});
+
+it("applies a manually entered GigaAM folder and stores its canonical path", async () => {
+  const entered = "  E:\\Exports\\GigaAM  ";
+  const canonical = "E:\\Exports\\GigaAM\\model";
+  azureMai.validateGigaam.mockResolvedValue({
+    model_dir: canonical,
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  });
+  const user = userEvent.setup();
+  render(<STTSettings />);
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  const pathInput = screen.getByRole("textbox", { name: "Model folder" });
+  await user.type(pathInput, entered);
+  await user.click(screen.getByRole("button", { name: "Apply Path" }));
+
+  await waitFor(() => expect(useConfigStore.getState().gigaamModelPath).toBe(canonical));
+  expect(azureMai.validateGigaam).toHaveBeenCalledWith(entered.trim());
+  expect(pathInput).toHaveValue(canonical);
+  expect(useConfigStore.getState().meetingAudioConfig?.you.local_model_path).toBe(canonical);
+});
+
+it("keeps the saved GigaAM folder when a manually entered folder is invalid", async () => {
+  const saved = "D:\\Models\\GigaAM";
+  const invalid = "E:\\Models\\Incomplete";
+  azureMai.validateGigaam.mockImplementation(async (path: string) => {
+    if (path === invalid) throw new Error("Missing GigaAM file: encoder.onnx");
+    return {
+      model_dir: path,
+      model_name: "v3_e2e_rnnt",
+      sample_rate: 16000,
+      features: 64,
+      vocabulary_size: 1024,
+      num_classes: 1025,
+    };
+  });
+  useConfigStore.setState({
+    gigaamModelPath: saved,
+    meetingAudioConfig: {
+      ...config,
+      you: { ...config.you, stt_provider: "gigaam", language: "ru-RU", local_model_path: saved },
+    },
+  });
+  const user = userEvent.setup();
+  render(<STTSettings />);
+
+  const pathInput = screen.getByRole("textbox", { name: "Model folder" });
+  await waitFor(() => expect(pathInput).toBeEnabled());
+  await user.clear(pathInput);
+  await user.type(pathInput, invalid);
+  await user.click(screen.getByRole("button", { name: "Apply Path" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Missing GigaAM file: encoder.onnx");
+  expect(pathInput).toHaveValue(invalid);
+  expect(useConfigStore.getState().gigaamModelPath).toBe(saved);
+  expect(useConfigStore.getState().meetingAudioConfig?.you.local_model_path).toBe(saved);
+});
+
+it("does not apply an empty manually entered GigaAM folder", async () => {
+  const user = userEvent.setup();
+  render(<STTSettings />);
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  const pathInput = screen.getByRole("textbox", { name: "Model folder" });
+  const applyButton = screen.getByRole("button", { name: "Apply Path" });
+  expect(applyButton).toBeDisabled();
+  await user.type(pathInput, "   ");
+  expect(applyButton).toBeDisabled();
+  expect(azureMai.validateGigaam).not.toHaveBeenCalled();
+  expect(useConfigStore.getState().gigaamModelPath).toBeNull();
+});
+
+it("does not save a detected GigaAM folder when full validation fails", async () => {
+  const detected = "C:\\Models\\GigaPisar\\model";
+  azureMai.validateGigaam.mockRejectedValueOnce("GigaAM encoder output encoded_len must be INT32");
+  const user = userEvent.setup();
+  render(<STTSettings />);
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  await user.click(screen.getByRole("button", { name: "Detect Default Folder" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("GigaAM encoder output encoded_len must be INT32");
+  expect(azureMai.validateGigaam).toHaveBeenCalledWith(detected);
+  expect(useConfigStore.getState().gigaamModelPath).toBeNull();
+  expect(useConfigStore.getState().meetingAudioConfig?.you).not.toHaveProperty("local_model_path");
+});
+
+it("shows local-export GigaAM warnings while keeping the validated folder", async () => {
+  const folder = "D:\\Models\\GigaAM";
+  const warning = "GigaAM encoder differs from the reference MD5. Locally exported models are supported, but this file is not identical to the reference release.";
+  dialog.open.mockResolvedValue(folder);
+  azureMai.validateGigaam.mockResolvedValue({
+    model_dir: folder,
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+    warnings: [warning],
+  });
+  const user = userEvent.setup();
+  render(<STTSettings />);
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  await user.click(screen.getByRole("button", { name: "Choose Folder" }));
+
+  expect(await screen.findByText(warning)).toBeInTheDocument();
+  expect(screen.getByText("v3_e2e_rnnt is ready")).toBeInTheDocument();
+  expect(useConfigStore.getState().gigaamModelPath).toBe(folder);
+});
+
+it("keeps an invalid GigaAM folder visible with an actionable error", async () => {
+  const folder = "D:\\Models\\Incomplete";
+  dialog.open.mockResolvedValue(folder);
+  azureMai.validateGigaam.mockRejectedValue("Missing GigaAM file: encoder.onnx");
+  const user = userEvent.setup();
+  render(<STTSettings />);
+  await user.click(screen.getByRole("button", { name: /GigaAM v3 RNNT/ }));
+
+  await user.click(screen.getByRole("button", { name: "Choose Folder" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Missing GigaAM file: encoder.onnx");
+  expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue(folder);
+  expect(azureMai.sttTest).not.toHaveBeenCalled();
+});
+
+it("tests a saved GigaAM folder without using another STT provider", async () => {
+  const folder = "C:\\Models\\GigaPisar\\model";
+  useConfigStore.setState({
+    gigaamModelPath: folder,
+    meetingAudioConfig: {
+      ...config,
+      you: { ...config.you, stt_provider: "gigaam", language: "ru-RU", local_model_path: folder },
+    },
+  });
+  const user = userEvent.setup();
+  render(<STTSettings />);
+
+  await user.click(screen.getByRole("button", { name: "Test Connection" }));
+
+  expect(await screen.findByText(/Ready — v3_e2e_rnnt/)).toBeInTheDocument();
+  expect(azureMai.validateGigaam).toHaveBeenCalledWith(folder);
+  expect(azureMai.sttTest).not.toHaveBeenCalled();
+});
 
 it("opens on the provider You uses and names the side that can't detect the language", () => {
   render(<STTSettings />);

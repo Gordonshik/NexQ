@@ -32,7 +32,8 @@ fn fake_bin() -> PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
         let mut cmd = std::process::Command::new(env!("CARGO"));
-        cmd.args(["build", "--example", "fake_claude"]).current_dir(env!("CARGO_MANIFEST_DIR"));
+        cmd.args(["build", "--example", "fake_claude", "--message-format=json"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"));
         for (key, _) in std::env::vars() {
             let injected = ["CARGO_MANIFEST_", "CARGO_PKG_", "CARGO_CRATE_", "CARGO_PRIMARY_PACKAGE", "CARGO_BIN_", "OUT_DIR"]
                 .iter()
@@ -45,9 +46,22 @@ fn fake_bin() -> PathBuf {
             cmd.arg("--release");
         }
         let out = cmd.output().expect("run cargo build --example fake_claude");
-        assert!(out.status.success(), "building fake_claude failed:\n{}", String::from_utf8_lossy(&out.stderr));
-        let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-        let bin = profile_dir.join("examples").join(format!("fake_claude{}", std::env::consts::EXE_SUFFIX));
+        assert!(
+            out.status.success(),
+            "building fake_claude failed:\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let bin = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|msg| {
+                msg["reason"] == "compiler-artifact"
+                    && msg["target"]["name"] == "fake_claude"
+                    && msg["executable"].is_string()
+            })
+            .and_then(|msg| msg["executable"].as_str().map(PathBuf::from))
+            .expect("cargo did not report the fake_claude executable");
         assert!(bin.is_file(), "missing {}", bin.display());
         bin
     })

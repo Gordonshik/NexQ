@@ -24,6 +24,20 @@ describe("updatePartyConfig", () => {
     expect(updatePartyConfig(config, "them", { language: "" }).them).not.toHaveProperty("language");
   });
 
+  it("drops cleared model keys instead of reviving stale provider settings", () => {
+    const withModels: MeetingAudioConfig = {
+      ...config,
+      you: { ...config.you, local_model_id: "old", local_model_path: "C:\\Old" },
+    };
+    const next = updatePartyConfig(withModels, "you", {
+      stt_provider: "gigaam",
+      local_model_id: undefined,
+      local_model_path: undefined,
+    });
+    expect(next.you).not.toHaveProperty("local_model_id");
+    expect(next.you).not.toHaveProperty("local_model_path");
+  });
+
   it("does not change the config it was given", () => {
     updatePartyConfig(config, "them", { language: undefined });
     expect(config.them.language).toBe("fr-FR");

@@ -9,6 +9,18 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 import { StealthSettings } from "./StealthSettings";
 import { useConfigStore } from "../stores/configStore";
 import { useToastStore } from "../stores/toastStore";
+import { useAgentStore } from "../stores/agentStore";
+import type { CliAgentStatus } from "../lib/types";
+
+const outdatedClaude: CliAgentStatus = {
+  kind: "claude_cli",
+  installed: true,
+  binary_path: "claude.exe",
+  version: "2.1.206 (Claude Code)",
+  auth: { logged_in: true, auth_method: "claude.ai", subscription_type: "max", email: "me@example.com", login: "subscription" },
+  npm_only: false,
+  required_version: "2.1.259",
+};
 
 const NOTE = /can't read images/i;
 
@@ -20,6 +32,7 @@ beforeEach(() => {
     captureShortcut: "CmdOrCtrl+Shift+S",
   });
   useToastStore.setState({ toasts: [] });
+  useAgentStore.setState({ statuses: {} });
 });
 
 afterEach(cleanup);
@@ -29,6 +42,14 @@ describe("StealthSettings capture shortcut row", () => {
     render(<StealthSettings />);
     expect(screen.getByText("Capture screen into Ask")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Change shortcut, currently Ctrl\+Shift\+S$/ })).toBeTruthy();
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it("keeps screen capture available for a custom endpoint when Claude is outdated", () => {
+    useConfigStore.setState({ llmProvider: "custom" });
+    useAgentStore.setState({ statuses: { claude_cli: outdatedClaude } });
+    render(<StealthSettings />);
+    expect(screen.getByText("Capture screen into Ask")).toBeTruthy();
     expect(screen.queryByText(NOTE)).toBeNull();
   });
 

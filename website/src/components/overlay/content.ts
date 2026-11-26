@@ -144,7 +144,7 @@ export const OV = {
   /** Scenario chip (OverlayView.tsx L222-224): the active scenario's name, src/lib/scenarios.ts L57. */
   scenario: 'Interview',
   idleQuestion: 'Listening for questions from the other party',
-  /** askPlaceholder(true): the Claude subscription can take a pasted screenshot (AskImages.tsx L24). */
+  /** askPlaceholder(true): Claude or a vision-capable local/custom model can take a pasted screenshot. */
   askPlaceholder: 'Ask or paste a screenshot',
   askLabel: 'Ask a question (sample, does not send)',
   /** The empty answer panel; on a touch screen the key hint becomes a tap hint. */

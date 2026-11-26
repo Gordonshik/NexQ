@@ -154,8 +154,47 @@ fn accumulator_segment_json(id: &str, speaker: &str, output: &AccumulatorOutput)
     with_turn(seg, output.turn)
 }
 
+fn uses_accumulated_transcripts(side: Side, provider: &str) -> bool {
+    if provider == "gigaam" {
+        false
+    } else if side == Side::You {
+        !matches!(provider, "web_speech" | "whisper_cpp")
+    } else {
+        true
+    }
+}
+
+/// A final line from a native STT provider goes to every backend consumer:
+/// the AI transcript buffer, the meeting's live RAG index and Live Notes/Brief.
+/// Web Speech calls the `push_transcript` command from the frontend instead, so
+/// it must not also come through this path.
+fn push_native_final_transcript(state: &AppState, speaker: &str, text: &str, timestamp_ms: u64) {
+    if let Some(ref intel) = state.intelligence {
+        if let Ok(mut engine) = intel.lock() {
+            engine.push_transcript(
+                text.to_string(),
+                speaker.to_string(),
+                timestamp_ms,
+                true,
+            );
+        }
+    }
+    if let Some(rag_arc) = state.rag.as_ref() {
+        if let Ok(mut rag_mgr) = rag_arc.lock() {
+            if rag_mgr.config().enabled && rag_mgr.config().include_transcript {
+                if let Some(indexer) = rag_mgr.transcript_indexer_mut() {
+                    indexer.push_segment(text, speaker, timestamp_ms);
+                }
+            }
+        }
+    }
+    if let Some(rt) = crate::live_runtime::global() {
+        rt.feed_current(speaker, text, timestamp_ms);
+    }
+}
+
 /// A line straight from a provider that segments on its own (Web Speech,
-/// whisper.cpp), without the accumulator.
+/// whisper.cpp, GigaAM), without the accumulator.
 fn result_segment_json(id: &str, speaker: &str, result: &crate::stt::provider::TranscriptResult) -> serde_json::Value {
     let seg = serde_json::json!({
         "id": id,
@@ -413,22 +452,11 @@ pub async fn start_capture(
                         }
                     }
 
-                    // Push final segments to the intelligence engine's
-                    // transcript buffer so the AI has access to what "Them" said.
+                    // Push final segments to every backend consumer so the AI,
+                    // Live Notes/Brief and live RAG all see what "Them" said.
                     if output.is_final && !is_interim_clear {
-                        if let Some(ref intel) = intel_arc {
-                            if let Ok(mut engine) = intel.lock() {
-                                engine.push_transcript(
-                                    output.text.clone(),
-                                    "Them".to_string(),
-                                    output.timestamp_ms,
-                                    true,
-                                );
-                            }
-                        }
-                        if let Some(rt) = crate::live_runtime::global() {
-                            rt.feed_current("Them", &output.text, output.timestamp_ms);
-                        }
+                        let state = stt_app.state::<AppState>();
+                        push_native_final_transcript(&state, "Them", &output.text, output.timestamp_ms);
                     }
                 }
             }
@@ -1417,14 +1445,12 @@ pub async fn start_capture_per_party(
 
     // Emit transcript events from "You" STT (speaker = "User")
     // Uses SegmentAccumulator for cloud providers (Deepgram, Groq, etc.)
-    // Skips accumulator for web_speech (browser handles segmentation)
-    // and whisper_cpp (dual-pass engine manages its own line breaking).
+    // Skips it for providers that already return complete segments.
     let mut mai_transcript_tasks = Vec::new();
     if you_stt_provider.is_some() {
         let stt_app = app.clone();
         let prefix = session_prefix.clone();
-        let use_accumulator = you.stt_provider != "web_speech"
-            && you.stt_provider != "whisper_cpp";
+        let use_accumulator = uses_accumulated_transcripts(Side::You, &you.stt_provider);
         let mut tally = TranscriptTally::new("You", &you.stt_provider);
         let you_signal_for_task = you_signal.clone();
         let pause_threshold = if use_accumulator {
@@ -1461,6 +1487,10 @@ pub async fn start_capture_per_party(
                             "segment": accumulator_segment_json(&seg_id, "User", &output)
                         });
                         let _ = stt_app.emit(event_name, &payload);
+                        if output.is_final {
+                            let state = stt_app.state::<AppState>();
+                            push_native_final_transcript(&state, "User", &output.text, output.timestamp_ms);
+                        }
                     },
                 )
                 .await;
@@ -1472,9 +1502,11 @@ pub async fn start_capture_per_party(
                         "segment": accumulator_segment_json(&seg_id, "User", &output)
                     });
                     let _ = stt_app.emit("transcript_final", &payload);
+                    let state = stt_app.state::<AppState>();
+                    push_native_final_transcript(&state, "User", &output.text, output.timestamp_ms);
                 }
             } else {
-                // Direct path: web_speech / whisper_cpp handle their own segmentation
+                // Direct path: the provider already returns complete segments
                 let mut counter = 0u64;
                 side_swap::pump_direct(
                     &mut you_stt_rx,
@@ -1504,6 +1536,10 @@ pub async fn start_capture_per_party(
                             "segment": result_segment_json(&seg_id, "User", &result)
                         });
                         let _ = stt_app.emit(event_name, &payload);
+                        if result.is_final {
+                            let state = stt_app.state::<AppState>();
+                            push_native_final_transcript(&state, "User", &result.text, result.timestamp_ms);
+                        }
                     },
                 )
                 .await;
@@ -1515,93 +1551,114 @@ pub async fn start_capture_per_party(
     }
 
     // Emit transcript events from "Them" STT (speaker = "Them")
-    // Uses SegmentAccumulator to merge consecutive same-speaker segments
-    // within the configurable pause threshold, producing longer lines.
     if them_stt_provider.is_some() {
         let stt_app = app.clone();
         let prefix = session_prefix.clone();
         let intel_arc = app.state::<AppState>().intelligence.clone();
         let pause_threshold = app.state::<AppState>().pause_threshold_ms.clone();
+        let use_accumulator = uses_accumulated_transcripts(Side::Them, &them.stt_provider);
         let mut tally = TranscriptTally::new("Them", &them.stt_provider);
         let them_signal_for_task = them_signal.clone();
         let transcript_task = tokio::spawn(async move {
-            use std::sync::atomic::Ordering;
-            let threshold = pause_threshold.load(Ordering::Relaxed);
-            let mut accumulator =
-                crate::stt::segment_accumulator::SegmentAccumulator::new(threshold);
+            if use_accumulator {
+                use std::sync::atomic::Ordering;
+                let threshold = pause_threshold.load(Ordering::Relaxed);
+                let mut accumulator =
+                    crate::stt::segment_accumulator::SegmentAccumulator::new(threshold);
 
-            side_swap::pump_accumulated(
-                &mut them_stt_rx,
-                &them_signal_for_task,
-                &mut accumulator,
-                &pause_threshold,
-                |result| {
-                    if !result.is_interim_clear() {
-                        tally.record(result.is_final);
-                    }
-                },
-                |output| {
-                    let event_name = if output.is_final {
-                        "transcript_final"
-                    } else {
-                        "transcript_update"
-                    };
-                    // Namespace IDs to avoid collision with "You" accumulator
+                side_swap::pump_accumulated(
+                    &mut them_stt_rx,
+                    &them_signal_for_task,
+                    &mut accumulator,
+                    &pause_threshold,
+                    |result| {
+                        if !result.is_interim_clear() {
+                            tally.record(result.is_final);
+                        }
+                    },
+                    |output| {
+                        let event_name = if output.is_final {
+                            "transcript_final"
+                        } else {
+                            "transcript_update"
+                        };
+                        let seg_id = format!("them_{}_{}", prefix, output.id);
+                        let seg = accumulator_segment_json(&seg_id, "Them", &output);
+                        let payload = serde_json::json!({ "segment": seg });
+                        let _ = stt_app.emit(event_name, &payload);
+
+                        let is_interim_clear = !output.is_final && output.text.is_empty();
+                        if !is_interim_clear {
+                            if let Some(ref intel) = intel_arc {
+                                if let Ok(mut engine) = intel.lock() {
+                                    engine.note_them_line(&seg_id, &output.text, output.is_final);
+                                }
+                            }
+                        }
+
+                        if output.is_final && !is_interim_clear {
+                            let state = stt_app.state::<AppState>();
+                            push_native_final_transcript(&state, "Them", &output.text, output.timestamp_ms);
+                        }
+                    },
+                )
+                .await;
+
+                // Flush remaining accumulated segment on meeting end
+                if let Some(output) = accumulator.flush() {
                     let seg_id = format!("them_{}_{}", prefix, output.id);
                     let seg = accumulator_segment_json(&seg_id, "Them", &output);
                     let payload = serde_json::json!({ "segment": seg });
-                    let _ = stt_app.emit(event_name, &payload);
+                    let _ = stt_app.emit("transcript_final", &payload);
 
-                    // A new line from Them replaces the old detected question.
-                    let is_interim_clear = !output.is_final && output.text.is_empty();
-                    if !is_interim_clear {
-                        if let Some(ref intel) = intel_arc {
-                            if let Ok(mut engine) = intel.lock() {
-                                engine.note_them_line(&seg_id, &output.text, output.is_final);
+                    let state = stt_app.state::<AppState>();
+                    push_native_final_transcript(&state, "Them", &output.text, output.timestamp_ms);
+                }
+            } else {
+                let mut counter = 0u64;
+                side_swap::pump_direct(
+                    &mut them_stt_rx,
+                    &them_signal_for_task,
+                    |result| tally.record(result.is_final),
+                    |generation, result| {
+                        let prefix = side_swap::generation_prefix(&prefix, generation);
+                        let seg_id = if let Some(ref custom_id) = result.segment_id {
+                            format!("them_{}_{}", prefix, custom_id)
+                        } else {
+                            if result.is_final {
+                                counter += 1;
+                            }
+                            if result.is_final {
+                                format!("them_{}_{}", prefix, counter)
+                            } else {
+                                format!("them_{}_{}", prefix, counter + 1)
+                            }
+                        };
+                        let event_name = if result.is_final {
+                            "transcript_final"
+                        } else {
+                            "transcript_update"
+                        };
+                        let payload = serde_json::json!({
+                            "segment": result_segment_json(&seg_id, "Them", &result)
+                        });
+                        let _ = stt_app.emit(event_name, &payload);
+
+                        let is_interim_clear = !result.is_final && result.text.is_empty();
+                        if !is_interim_clear {
+                            if let Some(ref intel) = intel_arc {
+                                if let Ok(mut engine) = intel.lock() {
+                                    engine.note_them_line(&seg_id, &result.text, result.is_final);
+                                }
                             }
                         }
-                    }
-
-                    // Push final segments to the intelligence engine
-                    if output.is_final && !is_interim_clear {
-                        if let Some(ref intel) = intel_arc {
-                            if let Ok(mut engine) = intel.lock() {
-                                engine.push_transcript(
-                                    output.text.clone(),
-                                    "Them".to_string(),
-                                    output.timestamp_ms,
-                                    true,
-                                );
-                            }
+                        if result.is_final && !is_interim_clear {
+                            let state = stt_app.state::<AppState>();
+                            push_native_final_transcript(&state, "Them", &result.text, result.timestamp_ms);
                         }
-                        if let Some(rt) = crate::live_runtime::global() {
-                            rt.feed_current("Them", &output.text, output.timestamp_ms);
-                        }
-                    }
-                },
-            )
-            .await;
-
-            // Flush remaining accumulated segment on meeting end
-            if let Some(output) = accumulator.flush() {
-                let seg_id = format!("them_{}_{}", prefix, output.id);
-                let seg = accumulator_segment_json(&seg_id, "Them", &output);
-                let payload = serde_json::json!({ "segment": seg });
-                let _ = stt_app.emit("transcript_final", &payload);
-
-                if let Some(ref intel) = intel_arc {
-                    if let Ok(mut engine) = intel.lock() {
-                        engine.push_transcript(
-                            output.text.clone(),
-                            "Them".to_string(),
-                            output.timestamp_ms,
-                            true,
-                        );
-                    }
-                }
-                if let Some(rt) = crate::live_runtime::global() {
-                    rt.feed_current("Them", &output.text, output.timestamp_ms);
-                }
+                    },
+                )
+                .await;
             }
         });
         if mai_them_active {
@@ -1896,18 +1953,32 @@ pub async fn start_capture_per_party(
 
         // Clean shutdown, both parties at once: a cloud provider waits for its
         // last results here (Deepgram up to a few seconds).
-        tokio::join!(
+        let (you_stop, them_stop) = tokio::join!(
             async {
                 if let Some(ref mut provider) = you_stt_provider {
-                    let _ = provider.stop_stream().await;
+                    provider.stop_stream().await
+                } else {
+                    Ok(())
                 }
             },
             async {
                 if let Some(ref mut provider) = them_stt_provider {
-                    let _ = provider.stop_stream().await;
+                    provider.stop_stream().await
+                } else {
+                    Ok(())
                 }
             },
         );
+        if let Err(error) = you_stop {
+            let message = format!("'You' STT stop error: {error}");
+            log::error!("{message}");
+            crate::stt::emit_stt_debug(&app_handle, "error", "stt", &message);
+        }
+        if let Err(error) = them_stop {
+            let message = format!("'Them' STT stop error: {error}");
+            log::error!("{message}");
+            crate::stt::emit_stt_debug(&app_handle, "error", "stt", &message);
+        }
         // The transcript tasks end (and flush) once no result channel is left open.
         drop(you_stt_tx);
         drop(them_stt_tx);
@@ -1976,6 +2047,9 @@ async fn create_stt_provider_for_party(
         deepgram_config.as_ref().map(|dg| dg.model.as_str()),
         party_role,
     )?;
+    if stt_type == STTProviderType::GigaAM {
+        crate::stt::gigaam::provider::validate_language(&stt_language)?;
+    }
 
     crate::stt::emit_stt_debug(app, "info", "stt",
         &format!("[{}] Creating provider: {} (lang: {}, model: {})",
@@ -2214,6 +2288,35 @@ async fn create_stt_provider_for_party(
                 }
             }
         }
+        STTProviderType::GigaAM => {
+            let selected = config
+                .local_model_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(std::path::PathBuf::from);
+            crate::stt::emit_stt_debug(
+                app,
+                "info",
+                "stt",
+                &format!(
+                    "[{party_role}] Loading shared GigaAM model from {}",
+                    selected
+                        .as_deref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "the default GigaPisar folder".to_string())
+                ),
+            );
+            let manager = std::sync::Arc::clone(&state.gigaam);
+            let engine = tokio::task::spawn_blocking(move || manager.lease(selected.as_deref()))
+                .await
+                .map_err(|error| format!("GigaAM model loading task failed: {error}"))??;
+            let mut provider =
+                crate::stt::gigaam::provider::GigaAmProvider::new(engine, party_role);
+            provider.set_language(&stt_language);
+            provider.set_app_handle(app.clone());
+            Ok(Some(Box::new(provider)))
+        }
         STTProviderType::ParakeetTdt => {
             // Guard: ignore model_id from a different engine (e.g., sense-voice-small from sherpa_onnx)
             let model_id = config
@@ -2414,6 +2517,11 @@ fn validate_auto_language_provider(
         STTProviderType::AzureSpeech => auto_refusal("Azure Speech", party_role, AUTO_DETECT_ADVICE),
         STTProviderType::SherpaOnnx => auto_refusal("Sherpa-ONNX", party_role, AUTO_DETECT_ADVICE),
         STTProviderType::OrtStreaming => auto_refusal("ORT Streaming", party_role, AUTO_DETECT_ADVICE),
+        STTProviderType::GigaAM => auto_refusal(
+            "GigaAM v3 RNNT",
+            party_role,
+            "Choose Russian (ru-RU) for that side, or pick another provider for Auto-detect.",
+        ),
         _ => auto_refusal("this speech-to-text provider", party_role, AUTO_DETECT_ADVICE),
     })
 }
@@ -2889,6 +2997,7 @@ mod tests {
     use super::*;
     use crate::audio::{PartyAudioConfig, PartyRole};
     use crate::stt::provider::{TranscriptResult, TurnSignal};
+    use std::sync::Mutex;
 
     fn output(turn: Option<TurnSignal>) -> AccumulatorOutput {
         AccumulatorOutput {
@@ -2979,6 +3088,35 @@ mod tests {
         assert!(selector_entry.requires_api_key);
         assert!(!selector_entry.is_local);
         assert!(selector_entry.supported_languages.iter().any(|language| language == "auto"));
+    }
+
+    #[test]
+    fn gigaam_bypasses_transcript_accumulation_on_both_sides() {
+        assert!(!uses_accumulated_transcripts(Side::You, "gigaam"));
+        assert!(!uses_accumulated_transcripts(Side::Them, "gigaam"));
+        assert!(!uses_accumulated_transcripts(Side::You, "web_speech"));
+        assert!(!uses_accumulated_transcripts(Side::You, "whisper_cpp"));
+        assert!(uses_accumulated_transcripts(Side::Them, "web_speech"));
+        assert!(uses_accumulated_transcripts(Side::You, "deepgram"));
+        assert!(uses_accumulated_transcripts(Side::Them, "deepgram"));
+    }
+
+    #[test]
+    fn native_you_final_reaches_ai_context_and_the_live_rag_index() {
+        let mut state = AppState::new();
+        state.intelligence = Some(Arc::new(Mutex::new(crate::intelligence::IntelligenceEngine::new())));
+        state.rag = Some(Arc::new(Mutex::new(crate::rag::RagManager::new(crate::rag::config::RagConfig {
+            enabled: true,
+            chunk_size: 1,
+            ..Default::default()
+        }))));
+
+        push_native_final_transcript(&state, "User", "We shipped the design system first.", 42);
+
+        let intel = state.intelligence.as_ref().unwrap().lock().unwrap();
+        assert_eq!(intel.get_all_transcript(), "[You]: We shipped the design system first.");
+        let mut rag = state.rag.as_ref().unwrap().lock().unwrap();
+        assert!(rag.transcript_indexer_mut().unwrap().should_flush());
     }
 
     #[test]
@@ -3250,6 +3388,7 @@ mod tests {
             is_input_device,
             stt_provider: stt_provider.to_string(),
             local_model_id: None,
+            local_model_path: None,
             language: None,
         }
     }

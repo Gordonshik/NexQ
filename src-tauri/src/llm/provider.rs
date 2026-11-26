@@ -308,6 +308,46 @@ pub struct CompletionStats {
 pub struct LLMMessage {
     pub role: String,
     pub content: String,
+    /// Images sent with this message: the screenshot in the Ask box. Empty for
+    /// every other message, and for a provider that can't read images (see
+    /// [`crate::llm::ProviderType::api_reads_images`]).
+    #[serde(default)]
+    pub images: Vec<crate::llm::cli_agent::protocol::ImageAttachment>,
+}
+
+impl LLMMessage {
+    /// A message without images.
+    pub fn text(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self { role: role.into(), content: content.into(), images: Vec::new() }
+    }
+}
+
+/// One message as an OpenAI-compatible chat entry: `content` stays a string
+/// unless the message carries images, then it is a text part and one
+/// `image_url` part per image (a base64 `data:` URL).
+pub fn openai_message_json(message: &LLMMessage) -> serde_json::Value {
+    if message.images.is_empty() {
+        return serde_json::json!({ "role": message.role, "content": message.content });
+    }
+    let mut parts: Vec<serde_json::Value> = Vec::with_capacity(message.images.len() + 1);
+    parts.push(serde_json::json!({ "type": "text", "text": message.content }));
+    for image in &message.images {
+        parts.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": format!("data:{};base64,{}", image.media_type, image.data) },
+        }));
+    }
+    serde_json::json!({ "role": message.role, "content": parts })
+}
+
+/// One message as an Ollama `/api/chat` entry: the base64 images ride in the
+/// message's own `images` array, next to its text.
+pub fn ollama_message_json(message: &LLMMessage) -> serde_json::Value {
+    if message.images.is_empty() {
+        return serde_json::json!({ "role": message.role, "content": message.content });
+    }
+    let images: Vec<&str> = message.images.iter().map(|image| image.data.as_str()).collect();
+    serde_json::json!({ "role": message.role, "content": message.content, "images": images })
 }
 
 /// The text of a transport error with its URL taken out. reqwest puts the

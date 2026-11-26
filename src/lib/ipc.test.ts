@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
-import { generateAssist, startCapturePerParty, testAzureMaiConnection } from "./ipc";
+import { detectGigaamModel, generateAssist, startCapturePerParty, testAzureMaiConnection, validateGigaamModel } from "./ipc";
 import type { PartyAudioConfig } from "./types";
 import { useTranscriptStore } from "../stores/transcriptStore";
 
@@ -35,6 +35,21 @@ describe("generateAssist", () => {
       { id: "a", text: "hello", speaker: "Them", timestamp_ms: 1 },
       { id: "b", text: "partial", speaker: "Them (interim)", timestamp_ms: 2 },
     ]);
+  });
+
+  it("forwards attached images to the backend", async () => {
+    useTranscriptStore.setState({ segments: [] } as never);
+    const images = [{ media_type: "image/png", data: "AAAA" }];
+
+    await generateAssist("AskQuestion", "What is this?", { requestId: "shot-1", images });
+
+    expect(invoke).toHaveBeenCalledWith("generate_assist", {
+      mode: "AskQuestion",
+      customQuestion: "What is this?",
+      transcriptSegments: "[]",
+      requestId: "shot-1",
+      images,
+    });
   });
 
   it("sends the source pills only when the caller has them (no pills = automatic = no sources)", async () => {
@@ -125,6 +140,46 @@ describe("startCapturePerParty", () => {
   it("starts both transcribers by default", async () => {
     await startCapturePerParty(you, them);
     expect(invoke.mock.calls[0][1].skipYouStt).toBe(false);
+  });
+});
+
+describe("GigaAM model inspection", () => {
+  const info = {
+    model_dir: "C:\\Models\\GigaPisar\\model",
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  };
+
+  beforeEach(() => {
+    invoke.mockReset();
+  });
+
+  it("detects the default installation without a path argument", async () => {
+    invoke.mockResolvedValue(info);
+    await expect(detectGigaamModel()).resolves.toEqual(info);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("detect_gigaam_model");
+  });
+
+  it("validates the chosen folder and preserves a Windows path", async () => {
+    invoke.mockResolvedValue(info);
+    await expect(validateGigaamModel(info.model_dir)).resolves.toEqual(info);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("validate_gigaam_model", { modelPath: info.model_dir });
+  });
+
+  it("passes shared model paths through both party configurations", async () => {
+    invoke.mockResolvedValue(undefined);
+    const you: PartyAudioConfig = {
+      role: "You", device_id: "Mic", is_input_device: true, stt_provider: "gigaam",
+      language: "ru-RU", local_model_path: info.model_dir,
+    };
+    const them: PartyAudioConfig = { ...you, role: "Them", device_id: "Speakers" };
+    await startCapturePerParty(you, them);
+    const payload = invoke.mock.calls[0][1];
+    expect(JSON.parse(payload.youConfig).local_model_path).toBe(info.model_dir);
+    expect(JSON.parse(payload.themConfig).local_model_path).toBe(info.model_dir);
   });
 });
 

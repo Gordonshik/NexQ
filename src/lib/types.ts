@@ -548,7 +548,8 @@ export type STTProviderType =
   | "sherpa_onnx"
   | "ort_streaming"
   | "windows_native"
-  | "parakeet_tdt";
+  | "parakeet_tdt"
+  | "gigaam";
 
 // == LOCAL STT ENGINE TYPES ==
 
@@ -594,6 +595,16 @@ export interface STTProviderConfig {
   is_local: boolean;
 }
 
+export interface GigaAmModelInfo {
+  model_dir: string;
+  model_name: string;
+  sample_rate: number;
+  features: number;
+  vocabulary_size: number;
+  num_classes: number;
+  warnings?: string[];
+}
+
 // == TWO-PARTY AUDIO MODEL ==
 
 export type PartyRole = "You" | "Them";
@@ -604,6 +615,7 @@ export interface PartyAudioConfig {
   is_input_device: boolean;
   stt_provider: STTProviderType;
   local_model_id?: string;
+  local_model_path?: string;
   /**
    * Transcription language for this side only (an STT_LANGUAGES value, "auto"
    * included). Absent means the shared transcription language, as in configs
@@ -839,7 +851,7 @@ export interface GenerateAssistOptions {
   pastMeetingId?: string;
   /** Transcript scope picked by the user; omitted (or `default`) keeps the action's own window. */
   scope?: ResolvedScope | null;
-  /** Images pasted into Ask; only a Claude (subscription) answer can use them. */
+  /** Images pasted or captured into Ask; used by Claude sessions and vision-capable Ollama, LM Studio or Custom models. */
   images?: ImageAttachment[];
   /**
    * The Knowledge / Tools pills as they are when the user asks. Leave it out for an

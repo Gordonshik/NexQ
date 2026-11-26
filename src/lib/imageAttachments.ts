@@ -21,11 +21,14 @@ export const MAX_INPUT_BYTES = 25 * 1024 * 1024;
 export const IMAGE_TOO_LARGE = "That image is too large. Paste a smaller area.";
 
 /**
- * Whether the LLM provider can read images. Only Claude (subscription) can;
- * pasting an image and the screen-capture shortcut both depend on this.
+ * Whether the LLM provider can read images: Claude (subscription), whose
+ * session takes them, and the local models (Ollama, LM Studio) and custom
+ * endpoints, whose chat API takes them. Pasting an image and the
+ * screen-capture shortcut both depend on this; the backend accepts the same
+ * set (`ProviderType::api_reads_images`).
  */
 export function providerReadsImages(provider: string): boolean {
-  return provider === "claude_cli";
+  return provider === "claude_cli" || provider === "ollama" || provider === "lm_studio" || provider === "custom";
 }
 
 /** Why `file` can't be attached, or `null` when it can. */

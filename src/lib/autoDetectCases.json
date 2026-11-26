@@ -32,6 +32,7 @@
     { "provider": "azure_speech", "model": "", "supported": false, "name": "Azure Speech" },
     { "provider": "azure_mai_streaming", "model": "", "supported": true },
     { "provider": "sherpa_onnx", "model": "", "supported": false, "name": "Sherpa-ONNX" },
-    { "provider": "ort_streaming", "model": "", "supported": false, "name": "ORT Streaming" }
+    { "provider": "ort_streaming", "model": "", "supported": false, "name": "ORT Streaming" },
+    { "provider": "gigaam", "model": "", "supported": false, "name": "GigaAM v3 RNNT" }
   ]
 }

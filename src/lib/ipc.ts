@@ -23,6 +23,7 @@ import type {
   DeepgramConfig,
   GenerateAssistOptions,
   GroqConfig,
+  GigaAmModelInfo,
   IpolicyStatus,
   LocalSTTEngineInfo,
   Meeting,
@@ -197,6 +198,14 @@ export async function setSTTLanguage(language: string): Promise<void> {
 
 export async function testSTTConnection(provider: string): Promise<boolean> {
   return invoke("test_stt_connection", { provider });
+}
+
+export async function detectGigaamModel(): Promise<GigaAmModelInfo> {
+  return invoke("detect_gigaam_model");
+}
+
+export async function validateGigaamModel(modelPath: string): Promise<GigaAmModelInfo> {
+  return invoke("validate_gigaam_model", { modelPath });
 }
 
 /** Test Azure MAI Streaming credentials before saving them to the credential store. */

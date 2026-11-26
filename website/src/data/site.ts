@@ -156,7 +156,7 @@ export const HOTKEYS: Hotkey[] = [
     keys: ['Mod', 'Shift', 'S'],
     action: 'Capture the screen into Ask',
     scope: 'global',
-    note: 'Windows only, Claude subscription only.',
+    note: 'Windows only. Claude subscription, or a vision-capable model (Ollama, LM Studio or a Custom endpoint).',
   },
   { keys: ['Space'], action: 'Assist', scope: 'app' },
   { keys: ['1'], action: 'What to say', scope: 'app' },
@@ -246,7 +246,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Can I use my ChatGPT plan?',
-    a: 'Yes, in beta. Install Codex, sign in once from Settings, then pick Fast and Deep models there. NexQ reads its current model list every time it starts. It runs without commands, file writes or web search, and can reach only the notes folders and tools you add, so the same Personal sources work with your Claude and ChatGPT plans. For Gemini, add a Google AI Studio API key. Screenshots and pasted images still need Claude.',
+    a: 'Yes, in beta. Install Codex, sign in once from Settings, then pick Fast and Deep models there. NexQ reads its current model list every time it starts. It runs without commands, file writes or web search, and can reach only the notes folders and tools you add, so the same Personal sources work with your Claude and ChatGPT plans. For Gemini, add a Google AI Studio API key. Screenshots and pasted images need Claude, or a vision-capable model (Ollama, LM Studio or a Custom endpoint).',
   },
   {
     q: 'How does the Claude subscription option work?',

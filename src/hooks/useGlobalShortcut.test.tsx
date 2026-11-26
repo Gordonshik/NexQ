@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LLMProviderType, Meeting } from "../lib/types";
+import type { CliAgentStatus, LLMProviderType, Meeting } from "../lib/types";
 
 const shortcuts = vi.hoisted(() => new Map<string, (event: { state: string }) => void>());
 const captureFailure = vi.hoisted(() => ({ message: "" }));
@@ -9,6 +9,15 @@ const emitted = vi.hoisted(() => [] as Array<[string, unknown]>);
 const invoked = vi.hoisted(() => [] as Array<[string, Record<string, unknown> | undefined]>);
 const eventHandlers = vi.hoisted(() => new Map<string, () => void>());
 const windowState = vi.hoisted(() => ({ overlayVisible: false }));
+const outdatedClaude: CliAgentStatus = {
+  kind: "claude_cli",
+  installed: true,
+  binary_path: "claude.exe",
+  version: "2.1.206 (Claude Code)",
+  auth: { logged_in: true, auth_method: "claude.ai", subscription_type: "max", email: "me@example.com", login: "subscription" },
+  npm_only: false,
+  required_version: "2.1.259",
+};
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({
   register: async (key: string, handler: (event: { state: string }) => void) => {
     if (key === registerFailure.key) throw new Error("already registered");
@@ -208,6 +217,14 @@ describe("capture screen shortcut", () => {
 
     act(() => overlay.setState({ activeMeeting: null }));
     await waitFor(() => expect(shortcuts.has(key)).toBe(false));
+  });
+
+  it("stays registered for a custom endpoint when Claude is outdated", async () => {
+    const { overlay, key } = await overlayWithProvider("custom");
+    const { useAgentStore } = await import("../stores/agentStore");
+    useAgentStore.setState({ statuses: { claude_cli: outdatedClaude } });
+    act(() => overlay.setState({ activeMeeting: { id: "m1" } as Meeting }));
+    await waitFor(() => expect(shortcuts.has(key)).toBe(true));
   });
 
   it("is not held with another provider even during a meeting", async () => {

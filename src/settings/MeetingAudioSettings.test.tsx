@@ -6,9 +6,12 @@ import type { MeetingAudioConfig } from "../lib/types";
 import type * as IPC from "../lib/ipc";
 
 const savedApiKeys = vi.hoisted(() => new Set<string>());
+const gigaam = vi.hoisted(() => ({ detect: vi.fn(), validate: vi.fn() }));
+const dialog = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
+vi.mock("@tauri-apps/plugin-dialog", () => dialog);
 vi.mock("@tauri-apps/plugin-store", () => ({
   load: async () => ({ set: async () => {}, get: async () => undefined, onKeyChange: async () => () => {} }),
 }));
@@ -20,6 +23,8 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   }),
   getAudioSessions: async () => [],
   hasApiKey: async (provider: string) => savedApiKeys.has(provider),
+  detectGigaamModel: () => gigaam.detect(),
+  validateGigaamModel: (path: string) => gigaam.validate(path),
   listLocalSTTEngines: async () => [],
   startDeviceMonitor: async () => {},
   stopDeviceMonitor: async () => {},
@@ -42,7 +47,24 @@ const initialConfig: MeetingAudioConfig = {
 const initialDeepgramConfig = useConfigStore.getState().deepgramConfig;
 beforeEach(() => {
   savedApiKeys.clear();
-  useConfigStore.setState({ meetingAudioConfig: initialConfig });
+  dialog.open.mockReset().mockResolvedValue(null);
+  gigaam.detect.mockReset().mockResolvedValue({
+    model_dir: "C:\\Models\\GigaPisar\\model",
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  });
+  gigaam.validate.mockReset().mockImplementation(async (path: string) => ({
+    model_dir: path,
+    model_name: "v3_e2e_rnnt",
+    sample_rate: 16000,
+    features: 64,
+    vocabulary_size: 1024,
+    num_classes: 1025,
+  }));
+  useConfigStore.setState({ meetingAudioConfig: initialConfig, gigaamModelPath: null });
 });
 afterEach(() => {
   cleanup();
@@ -63,6 +85,120 @@ it("offers Azure MAI Streaming in each side's cloud provider picker when its key
     expect(useConfigStore.getState().meetingAudioConfig?.[side.toLowerCase() as "you" | "them"].stt_provider)
       .toBe("azure_mai_streaming");
   }
+});
+
+it("offers GigaAM to both parties with one shared folder and Russian-only side languages", async () => {
+  const folder = "C:\\Models\\GigaPisar\\model";
+  useConfigStore.setState({ gigaamModelPath: folder, sttLanguage: "en-US" });
+  const user = userEvent.setup();
+  render(<MeetingAudioSettings />);
+
+  for (const side of ["You", "Them"] as const) {
+    await user.click(screen.getByRole("button", { name: `${side} speech-to-text provider` }));
+    await user.click(await screen.findByRole("button", { name: "GigaAM v3 RNNT" }));
+  }
+
+  for (const side of ["you", "them"] as const) {
+    const party = useConfigStore.getState().meetingAudioConfig![side];
+    expect(party).toMatchObject({
+      stt_provider: "gigaam",
+      language: "ru-RU",
+      local_model_path: folder,
+    });
+    expect(party).not.toHaveProperty("local_model_id");
+    const language = screen.getByRole<HTMLSelectElement>("combobox", {
+      name: `${side === "you" ? "You" : "Them"} language`,
+    });
+    expect(language).toBeDisabled();
+    expect(language).toHaveValue("ru-RU");
+    expect(Array.from(language.options, (option) => option.textContent)).toEqual(["Russian"]);
+  }
+  expect(useConfigStore.getState().sttLanguage).toBe("en-US");
+  expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue(folder);
+});
+
+it("does not revive stale model settings when GigaAM has no shared folder", async () => {
+  useConfigStore.setState({
+    meetingAudioConfig: {
+      ...initialConfig,
+      you: {
+        ...initialConfig.you,
+        local_model_id: "old-model",
+        local_model_path: "C:\\Stale\\Model",
+      },
+    },
+  });
+  const user = userEvent.setup();
+  render(<MeetingAudioSettings />);
+
+  await user.click(screen.getByRole("button", { name: "You speech-to-text provider" }));
+  await user.click(await screen.findByRole("button", { name: "GigaAM v3 RNNT" }));
+
+  const you = useConfigStore.getState().meetingAudioConfig!.you;
+  expect(you.stt_provider).toBe("gigaam");
+  expect(you).not.toHaveProperty("local_model_id");
+  expect(you).not.toHaveProperty("local_model_path");
+});
+
+it("clears the GigaAM folder from a side when it switches providers", async () => {
+  const folder = "C:\\Models\\GigaPisar\\model";
+  useConfigStore.setState({
+    gigaamModelPath: folder,
+    meetingAudioConfig: {
+      ...initialConfig,
+      you: { ...initialConfig.you, stt_provider: "gigaam", language: "ru-RU", local_model_path: folder },
+    },
+  });
+  const user = userEvent.setup();
+  render(<MeetingAudioSettings />);
+
+  await user.click(screen.getByRole("button", { name: "You speech-to-text provider" }));
+  await user.click(await screen.findByRole("button", { name: "Windows Speech" }));
+
+  const you = useConfigStore.getState().meetingAudioConfig!.you;
+  expect(you.stt_provider).toBe("windows_native");
+  expect(you).not.toHaveProperty("local_model_path");
+});
+
+it("changes the shared GigaAM folder for both parties from Audio & Devices", async () => {
+  const first = "C:\\Models\\GigaPisar\\model";
+  const next = "D:\\Models\\GigaAM";
+  useConfigStore.setState({
+    gigaamModelPath: first,
+    meetingAudioConfig: {
+      ...initialConfig,
+      you: { ...initialConfig.you, stt_provider: "gigaam", language: "ru-RU", local_model_path: first },
+      them: { ...initialConfig.them, stt_provider: "gigaam", language: "ru-RU", local_model_path: first },
+    },
+  });
+  dialog.open.mockResolvedValue(next);
+  const user = userEvent.setup();
+  render(<MeetingAudioSettings />);
+
+  await user.click(screen.getByRole("button", { name: "Choose Folder" }));
+
+  await waitFor(() => expect(useConfigStore.getState().gigaamModelPath).toBe(next));
+  expect(useConfigStore.getState().meetingAudioConfig?.you.local_model_path).toBe(next);
+  expect(useConfigStore.getState().meetingAudioConfig?.them.local_model_path).toBe(next);
+  expect(gigaam.validate).toHaveBeenCalledWith(next);
+});
+
+it("keeps saved GigaAM parties selected while their folder is not configured", () => {
+  useConfigStore.setState({
+    sttLanguage: "en-US",
+    meetingAudioConfig: {
+      ...initialConfig,
+      you: { ...initialConfig.you, stt_provider: "gigaam", language: "ru-RU" },
+      them: { ...initialConfig.them, stt_provider: "gigaam", language: "ru-RU" },
+    },
+  });
+  render(<MeetingAudioSettings />);
+
+  expect(screen.getByRole("button", { name: "You speech-to-text provider" })).toHaveTextContent("GigaAM v3 RNNT");
+  expect(screen.getByRole("button", { name: "Them speech-to-text provider" })).toHaveTextContent("GigaAM v3 RNNT");
+  expect(screen.getByRole("textbox", { name: "Model folder" })).toHaveValue("");
+  expect(useConfigStore.getState().meetingAudioConfig?.you.stt_provider).toBe("gigaam");
+  expect(useConfigStore.getState().meetingAudioConfig?.them.stt_provider).toBe("gigaam");
 });
 
 it("uses MAI multilingual Auto-detect by default and keeps explicit per-side language selection", async () => {

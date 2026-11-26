@@ -30,6 +30,7 @@ import { AnchoredBox } from "../ui/Popover";
 import { Tooltip } from "../ui/Tooltip";
 import { usePickerKeys } from "./usePickerKeys";
 import { useElementSize } from "../overlay/useElementSize";
+import { GIGAAM_NAME, selectGigaam } from "../lib/gigaam";
 
 // ── Human-friendly provider labels ──
 const LLM_LABELS: Record<string, string> = {
@@ -58,6 +59,7 @@ export const STT_LABELS: Record<string, string> = {
   sherpa_onnx: "Sherpa-ONNX",
   ort_streaming: "ORT Streaming",
   parakeet_tdt: "Parakeet TDT",
+  gigaam: GIGAAM_NAME,
   windows_native: "Windows Speech",
 };
 
@@ -76,6 +78,7 @@ const STT_PROVIDER_OPTIONS: {
   { value: "sherpa_onnx", label: "Sherpa-ONNX", IconComponent: HardDrive, requiresKey: false, requiresDownload: "sherpa_onnx" },
   { value: "ort_streaming", label: "ORT Streaming", IconComponent: Zap, requiresKey: false, requiresDownload: "ort_streaming" },
   { value: "parakeet_tdt", label: "Parakeet TDT", IconComponent: Cpu, requiresKey: false, requiresDownload: "parakeet_tdt" },
+  { value: "gigaam", label: GIGAAM_NAME, IconComponent: Cpu, requiresKey: false },
   { value: "deepgram", label: "Deepgram", IconComponent: Cloud, requiresKey: true },
   { value: "whisper_api", label: "Whisper API", IconComponent: Cloud, requiresKey: true },
   { value: "azure_speech", label: "Azure Speech", IconComponent: Cloud, requiresKey: true },
@@ -225,22 +228,30 @@ export function ServiceStatusBar({ compact = false }: { compact?: boolean }) {
   // ── Provider change handler ──
   // Updates meetingAudioConfig; useAudioConfigSync automatically restarts capture.
   const handleProviderChange = useCallback((party: "you" | "them", provider: STTProviderType) => {
-    if (!meetingAudioConfig) return;
-    const updates: Partial<typeof meetingAudioConfig.you> = { stt_provider: provider };
-    if (provider === "sherpa_onnx" || provider === "ort_streaming" || provider === "parakeet_tdt") {
-      const activeModelPerEngine = useConfigStore.getState().activeModelPerEngine;
-      const engineModel = activeModelPerEngine[provider]
-        ?? DEFAULT_MODEL_PER_ENGINE[provider]
-        ?? useConfigStore.getState().activeWhisperModel;
-      if (engineModel) updates.local_model_id = engineModel;
+    const state = useConfigStore.getState();
+    const current = state.meetingAudioConfig;
+    if (!current) return;
+    let nextParty: typeof current.you;
+    if (provider === "gigaam") {
+      nextParty = selectGigaam(current[party], state.gigaamModelPath);
+    } else {
+      let model: string | undefined;
+      if (provider === "sherpa_onnx" || provider === "ort_streaming" || provider === "parakeet_tdt") {
+        model = state.activeModelPerEngine[provider]
+          ?? DEFAULT_MODEL_PER_ENGINE[provider]
+          ?? state.activeWhisperModel;
+      } else if (provider === "whisper_cpp") {
+        model = state.activeWhisperModel ?? undefined;
+      }
+      nextParty = { ...current[party], stt_provider: provider, local_model_id: model };
     }
-    setMeetingAudioConfig({
-      ...meetingAudioConfig,
-      [party]: { ...meetingAudioConfig[party], ...updates },
+    state.setMeetingAudioConfig({
+      ...current,
+      [party]: nextParty,
       preset_name: null,
     });
     setPickerOpen(null);
-  }, [meetingAudioConfig, setMeetingAudioConfig]);
+  }, [setMeetingAudioConfig]);
 
   // The meeting footer is one row that can never overlap, whatever the names are. It starts with
   // everything and gives up one thing at a time while the row overflows (measured, not by width):

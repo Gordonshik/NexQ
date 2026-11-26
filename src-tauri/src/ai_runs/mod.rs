@@ -140,7 +140,7 @@ impl AiRunRequest {
             selection,
             system: system.to_string(),
             stable_context: None,
-            messages: vec![LLMMessage { role: "user".into(), content: user.to_string() }],
+            messages: vec![LLMMessage::text("user", user)],
             max_output: 1024,
             temperature: None,
             cancel: Arc::new(CancelToken::new()),
@@ -733,7 +733,7 @@ impl AiRuns {
 
         let mut messages = Vec::with_capacity(req.messages.len() + 1);
         if !system.is_empty() {
-            messages.push(LLMMessage { role: "system".into(), content: system });
+            messages.push(LLMMessage::text("system", system));
         }
         messages.extend(req.messages.iter().cloned());
 

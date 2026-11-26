@@ -341,7 +341,7 @@ pub fn build(
     let system = plan.prompt_parts.iter().filter(|p| p.stable).map(|p| p.text.as_str()).collect::<Vec<_>>().join("\n\n");
     let volatile = plan.prompt_parts.iter().filter(|p| !p.stable).map(|p| p.text.as_str()).collect::<Vec<_>>().join("\n\n");
     let user_text = if volatile.is_empty() { question.to_string() } else { format!("{volatile}\n\nQuestion:\n{question}") };
-    let history: Vec<LLMMessage> = plan.turns.iter().map(|t| LLMMessage { role: t.role.clone(), content: t.content.clone() }).collect();
+    let history: Vec<LLMMessage> = plan.turns.iter().map(|t| LLMMessage::text(t.role.clone(), t.content.clone())).collect();
 
     let meeting_ids: Vec<String> = scope.meetings.iter().map(|m| m.id.clone()).collect();
     let sources_cfg = deps.sources.read().map(|c| c.clone()).unwrap_or_default();
@@ -938,7 +938,7 @@ async fn answer(deps: &Arc<ChatDeps>, permit: &Permit, chat_id: &str, question: 
         }
         let mut req = AiRunRequest::new(AiPurpose::Chat, a.selection.clone(), &a.system, &a.user_text);
         let mut messages = a.history.clone();
-        messages.push(LLMMessage { role: "user".into(), content: a.user_text.clone() });
+        messages.push(LLMMessage::text("user", a.user_text.clone()));
         req.messages = messages;
         req.max_output = MAX_ANSWER_TOKENS;
         req.cancel = permit.cancel.clone();

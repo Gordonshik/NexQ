@@ -27,10 +27,12 @@ export function SideLanguagePicker({ side }: { side: LanguageSide }) {
   const popRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const options = [
-    { value: SAME_AS_SHARED_LANGUAGE, label: `Default: ${info?.sharedLabel ?? ""}` },
-    ...STT_LANGUAGES,
-  ];
+  const options = info?.provider === "gigaam"
+    ? [{ value: "ru-RU", label: "Russian" }]
+    : [
+        { value: SAME_AS_SHARED_LANGUAGE, label: `Default: ${info?.sharedLabel ?? ""}` },
+        ...STT_LANGUAGES,
+      ];
 
   const close = useCallback((refocus = true) => {
     setOpen(false);

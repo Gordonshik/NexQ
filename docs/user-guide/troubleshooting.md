@@ -146,6 +146,20 @@ For a practical check, start a test meeting, speak on each configured side, veri
 - **Ollama and LM Studio** don't do speech-to-text, so they can't be used here. Use a server built for transcription, such as faster-whisper-server (Speaches)
 - **Fails mid-meeting**: NexQ shows the error once and clears it when the next segment succeeds. Whisper API sends audio in batches of about 5 seconds, so a slow server delays text; a request that takes more than 30 seconds is dropped
 
+### GigaAM Model or Transcription Problems
+
+**Problem**: GigaAM cannot be selected, Save & Test rejects the folder, or audio meters move without final text.
+
+**Solution**:
+
+- **Invalid model folder**: Select the folder containing `v3_e2e_rnnt.yaml`, the encoder/decoder/joint `.onnx` files, and `v3_e2e_rnnt_tokenizer.model`. Do not select the parent `GigaPisar` folder unless it directly contains those files; the usual model folder is `GigaPisar\model`.
+- **Incompatible export**: NexQ validates the YAML preprocessing settings and all ONNX input/output shapes, then runs a short inference. Use a GigaAM `v3_e2e_rnnt` export with 16 kHz audio and 64 mel features.
+- **Reference hash warning**: The files differ from the reference export. This is advisory because Unsloth or another exporter may produce a working local model. Continue to Save & Test; a shape, type, or inference error is not advisory.
+- **No text yet**: GigaAM emits final segments only. Speak for at least one second, pause for 0.8 seconds, and allow inference time. Continuous speech is split at 20 seconds; silence is ignored.
+- **Language refused**: GigaAM supports Russian only. Select `ru-RU` for that party and do not use Auto-detect.
+- **Both sides are slow**: They intentionally share one model and run inference serially. Test one side at a time, or use another provider for one side if independent parallel recognition is more important.
+- **Runtime error**: Open the Dev Log (`Ctrl+Shift+L`) for the failing ONNX session or tensor shape, and check that the selected folder has not changed since Save & Test.
+
 ### Local Whisper Model Slow or Inaccurate
 
 **Problem**: Local Whisper transcription has high latency or poor accuracy.

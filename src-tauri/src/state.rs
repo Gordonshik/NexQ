@@ -21,6 +21,7 @@ use crate::sources::config::{McpServer, PersonalSourcesConfig};
 use crate::translation::TranslationRouter;
 use crate::translation::opus_mt_manager::OpusMtManager;
 use crate::stt::groq_whisper::GroqConfig;
+use crate::stt::gigaam::GigaAmManager;
 use crate::stt::local_engines::ModelManager;
 use crate::stt::provider::DualPassConfig;
 use crate::stt::STTRouter;
@@ -72,6 +73,7 @@ pub struct AppState {
     pub context: Option<Arc<Mutex<ContextManager>>>,
     pub credentials: Option<Arc<Mutex<CredentialManager>>>,
     pub model_manager: Option<Arc<Mutex<ModelManager>>>,
+    pub gigaam: Arc<GigaAmManager>,
     pub rag: Option<Arc<Mutex<RagManager>>>,
     pub translation: Option<Arc<Mutex<TranslationRouter>>>,
     pub opus_mt_manager: Option<Arc<Mutex<OpusMtManager>>>,
@@ -209,6 +211,7 @@ impl AppState {
             context: None,
             credentials: None,
             model_manager: None,
+            gigaam: Arc::new(GigaAmManager::default()),
             rag: None,
             translation: None,
             opus_mt_manager: None,

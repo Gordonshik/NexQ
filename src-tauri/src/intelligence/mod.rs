@@ -174,6 +174,8 @@ impl IntelligenceEngine {
         include_question: bool,
         include_rag: bool,
         include_instructions: bool,
+        // Images pasted or captured into Ask, sent with the user message.
+        images: Vec<crate::llm::cli_agent::protocol::ImageAttachment>,
         llm_provider: Arc<tokio::sync::Mutex<Box<dyn crate::llm::provider::LLMProvider>>>,
         model: String,
         provider_name: String,
@@ -202,7 +204,7 @@ impl IntelligenceEngine {
         // The system prompt IS the only instruction (per-action editable + composed instructions).
         // The user message contains only togglable data sections (transcript, RAG, questions).
         let builder = ContextBuilder::new();
-        let messages = builder.build_prompt_with_config(
+        let mut messages = builder.build_prompt_with_config(
             system_prompt,
             &transcript_text,
             last_question.as_ref(),
@@ -212,6 +214,11 @@ impl IntelligenceEngine {
             include_transcript,
             include_question,
         );
+        // The screenshot rides on the user message; every provider that gets
+        // images can read them (the command checks that before getting here).
+        if let Some(user) = messages.iter_mut().rev().find(|m| m.role == "user") {
+            user.images = images;
+        }
 
         // Check for cancellation before starting
         if cancel_token.is_cancelled() {

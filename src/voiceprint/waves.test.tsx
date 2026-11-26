@@ -18,7 +18,7 @@ const BARS: ContextBar[] = [
 describe("ContextWave", () => {
   it("labels every bar and all five layers", () => {
     render(<ContextWave bars={BARS} window={128000} budget={24000} />);
-    expect(screen.getByRole("button", { name: /Meetings: Kickoff 3 Nov, 4,200 tokens, relevance 82 percent/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Meetings: Kickoff 3 Nov, 4[\s,\u00a0]200 tokens, relevance 82 percent/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Instructions and memory: Instructions.*pinned/ })).toBeInTheDocument();
     const legend = within(screen.getByRole("list"));
     for (const name of ["Instructions and memory", "Meetings", "Documents", "Folders", "Conversation"]) {
